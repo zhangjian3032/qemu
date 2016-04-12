@@ -14,6 +14,7 @@
 
 #include "hw/arm/arm.h"
 #include "hw/intc/aspeed_vic.h"
+#include "hw/misc/aspeed_scu.h"
 #include "hw/timer/aspeed_timer.h"
 #include "hw/net/cadence_gem.h"
 
@@ -27,6 +28,7 @@ typedef struct AST2400State {
     AspeedVICState vic;
     AspeedTimerCtrlState timerctrl;
     CadenceGEMState    gem;
+    AspeedSCUState scu;
 } AST2400State;
 
 #define TYPE_AST2400 "ast2400"
