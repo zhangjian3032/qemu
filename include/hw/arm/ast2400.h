@@ -17,6 +17,7 @@
 #include "hw/misc/aspeed_scu.h"
 #include "hw/timer/aspeed_timer.h"
 #include "hw/net/cadence_gem.h"
+#include "hw/i2c/aspeed_i2c.h"
 
 typedef struct AST2400State {
     /*< private >*/
@@ -30,6 +31,7 @@ typedef struct AST2400State {
     AspeedTimerCtrlState timerctrl;
     CadenceGEMState    gem;
     AspeedSCUState scu;
+    AspeedI2CState i2c;
 } AST2400State;
 
 #define TYPE_AST2400 "ast2400"
