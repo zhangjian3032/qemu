@@ -254,6 +254,7 @@ typedef enum {
     WRDI = 0x4,
     RDSR = 0x5,
     WREN = 0x6,
+    RDCR = 0x15,
     JEDEC_READ = 0x9f,
     BULK_ERASE = 0xc7,
     READ_FSR = 0x70,
@@ -682,6 +683,13 @@ static void decode_new_cmd(Flash *s, uint32_t value)
 
     case RDSR:
         s->data[0] = (!!s->write_enable) << 1;
+        s->pos = 0;
+        s->len = 1;
+        s->state = STATE_READING_DATA;
+        break;
+
+    case RDCR:
+        s->data[0] = (!!s->four_bytes_address_mode) << 5;
         s->pos = 0;
         s->len = 1;
         s->state = STATE_READING_DATA;
