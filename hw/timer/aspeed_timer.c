@@ -16,6 +16,7 @@
 #include "qemu-common.h"
 #include "qemu/bitops.h"
 #include "qemu/timer.h"
+#include "qemu/log.h"
 #include "trace.h"
 
 #define TIMER_NR_REGS 4
@@ -80,22 +81,18 @@ static inline bool timer_external_clock(AspeedTimer *t)
     return timer_ctrl_status(t, op_external_clock);
 }
 
-static double clock_rates[] = { TIMER_CLOCK_APB_HZ, TIMER_CLOCK_EXT_HZ };
+static uint32_t clock_rates[] = { TIMER_CLOCK_APB_HZ, TIMER_CLOCK_EXT_HZ };
 
-static inline double calculate_rate(struct AspeedTimer *t)
+static inline uint32_t calculate_rate(struct AspeedTimer *t)
 {
     return clock_rates[timer_external_clock(t)];
-}
-
-static inline double calculate_period(struct AspeedTimer *t)
-{
-    return NANOSECONDS_PER_SECOND / calculate_rate(t);
 }
 
 static inline uint32_t calculate_ticks(struct AspeedTimer *t, uint64_t now_ns)
 {
     uint64_t delta_ns = now_ns - MIN(now_ns, t->start);
-    uint32_t ticks = (uint32_t) floor(delta_ns / calculate_period(t));
+    uint32_t rate = calculate_rate(t);
+    uint64_t ticks = muldiv64(delta_ns, rate, NANOSECONDS_PER_SECOND);
 
     return t->reload - MIN(t->reload, ticks);
 }
@@ -103,43 +100,44 @@ static inline uint32_t calculate_ticks(struct AspeedTimer *t, uint64_t now_ns)
 static inline uint64_t calculate_time(struct AspeedTimer *t, uint32_t ticks)
 {
     uint64_t delta_ns;
+    uint64_t delta_ticks;
 
-    ticks = MIN(t->reload, ticks);
-    delta_ns = (uint64_t) floor((t->reload - ticks) * calculate_period(t));
+    delta_ticks = t->reload - MIN(t->reload, ticks);
+    delta_ns = muldiv64(delta_ticks, NANOSECONDS_PER_SECOND, calculate_rate(t));
 
     return t->start + delta_ns;
 }
 
 static uint64_t calculate_next(struct AspeedTimer *t)
 {
-    uint64_t now;
-    uint64_t next;
-    int i;
-    /* We don't know the relationship between the values in the match
-     * registers, so sort using MAX/MIN/zero. We sort in that order as the
-     * timer counts down to zero. */
-    uint64_t seq[] = {
-        MAX(t->match[0], t->match[1]),
-        MIN(t->match[0], t->match[1]),
-        0,
-    };
+    uint64_t next = 0;
+    uint32_t rate = calculate_rate(t);
 
-    now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
-    for (i = 0; i < ARRAY_SIZE(seq); i++) {
-        next = calculate_time(t, seq[i]);
-        if (now < next) {
-            return next;
+    while (!next) {
+        /* We don't know the relationship between the values in the match
+         * registers, so sort using MAX/MIN/zero. We sort in that order as the
+         * timer counts down to zero. */
+        uint64_t seq[] = {
+            calculate_time(t, MAX(t->match[0], t->match[1])),
+            calculate_time(t, MIN(t->match[0], t->match[1])),
+            calculate_time(t, 0),
+        };
+        uint64_t reload_ns;
+        uint64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+
+        if (now < seq[0]) {
+            next = seq[0];
+        } else if (now < seq[1]) {
+            next = seq[1];
+        } else if (now < seq[2]) {
+            next = seq[2];
+        } else {
+            reload_ns = muldiv64(t->reload, NANOSECONDS_PER_SECOND, rate);
+            t->start = now - ((now - t->start) % reload_ns);
         }
     }
 
-    {
-        uint64_t reload_ns;
-
-        reload_ns = (uint64_t) floor(t->reload * calculate_period(t));
-        t->start = now - ((now - t->start) % reload_ns);
-    }
-
-    return calculate_next(t);
+    return next;
 }
 
 static void aspeed_timer_expire(void *opaque)
@@ -238,8 +236,9 @@ static void aspeed_timer_set_value(AspeedTimerCtrlState *s, int timer, int reg,
         if (timer_enabled(t)) {
             uint64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
             int64_t delta = (int64_t) value - (int64_t) calculate_ticks(t, now);
+            uint32_t rate = calculate_rate(t);
 
-            t->start += delta * calculate_period(t);
+            t->start += muldiv64(delta, NANOSECONDS_PER_SECOND, rate);
             timer_mod(&t->timer, calculate_next(t));
         }
         break;
@@ -261,7 +260,7 @@ static void aspeed_timer_set_value(AspeedTimerCtrlState *s, int timer, int reg,
 }
 
 /* Control register operations are broken out into helpers that can be
- * explictly called on aspeed_timer_reset(), but also from
+ * explicitly called on aspeed_timer_reset(), but also from
  * aspeed_timer_ctrl_op().
  */
 
@@ -447,7 +446,7 @@ static void aspeed_timer_reset(DeviceState *dev)
 
     for (i = 0; i < ASPEED_TIMER_NR_TIMERS; i++) {
         AspeedTimer *t = &s->timers[i];
-        /* Explictly call helpers to avoid any conditional behaviour through
+        /* Explicitly call helpers to avoid any conditional behaviour through
          * aspeed_timer_set_ctrl().
          */
         aspeed_timer_ctrl_enable(t, false);
@@ -465,8 +464,8 @@ static void aspeed_timer_reset(DeviceState *dev)
 
 static const VMStateDescription vmstate_aspeed_timer = {
     .name = "aspeed.timer",
-    .version_id = 1,
-    .minimum_version_id = 1,
+    .version_id = 2,
+    .minimum_version_id = 2,
     .fields = (VMStateField[]) {
         VMSTATE_UINT8(id, AspeedTimer),
         VMSTATE_INT32(level, AspeedTimer),
@@ -485,7 +484,7 @@ static const VMStateDescription vmstate_aspeed_timer_state = {
         VMSTATE_UINT32(ctrl, AspeedTimerCtrlState),
         VMSTATE_UINT32(ctrl2, AspeedTimerCtrlState),
         VMSTATE_STRUCT_ARRAY(timers, AspeedTimerCtrlState,
-                             ASPEED_TIMER_NR_TIMERS, 1, vmstate_aspeed_timer,
+                             ASPEED_TIMER_NR_TIMERS, 2, vmstate_aspeed_timer,
                              AspeedTimer),
         VMSTATE_END_OF_LIST()
     }

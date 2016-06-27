@@ -17,6 +17,10 @@
 #include "hw/arm/arm.h"
 #include "hw/arm/ast2400.h"
 #include "hw/boards.h"
+#include "qemu/log.h"
+#include "sysemu/block-backend.h"
+#include "sysemu/blockdev.h"
+#include "hw/block/flash.h"
 
 static struct arm_boot_info palmetto_bmc_binfo = {
     .loader_start = AST2400_SDRAM_BASE,
@@ -29,6 +33,36 @@ typedef struct PalmettoBMCState {
     MemoryRegion ram;
     MemoryRegion ram_alias;
 } PalmettoBMCState;
+
+static bool palmetto_bmc_has_flash0;
+
+static void palmetto_bmc_init_flashes(AspeedSMCState *s, const char *flashtype,
+                                      Error **errp)
+{
+    int i ;
+
+    for (i = 0; i < s->num_cs; ++i) {
+        AspeedSMCFlash *fl = &s->flashes[i];
+        DriveInfo *dinfo = drive_get_next(IF_MTD);
+        qemu_irq cs_line;
+
+        /*
+         * FIXME: check that we are not using a flash module exceeding
+         * the controller segment size
+         */
+        fl->flash = ssi_create_slave_no_init(s->spi, flashtype);
+        if (dinfo) {
+            qdev_prop_set_drive(fl->flash, "drive", blk_by_legacy_dinfo(dinfo),
+                                errp);
+            palmetto_bmc_has_flash0 = true;
+        }
+        m25p80_set_rom_storage(fl->flash, &fl->mmio);
+        qdev_init_nofail(fl->flash);
+
+        cs_line = qdev_get_gpio_in_named(fl->flash, SSI_GPIO_CS, 0);
+        sysbus_connect_irq(SYS_BUS_DEVICE(s), i + 1, cs_line);
+    }
+}
 
 static void palmetto_bmc_init(MachineState *machine)
 {
@@ -47,8 +81,28 @@ static void palmetto_bmc_init(MachineState *machine)
 
     object_property_add_const_link(OBJECT(&bmc->soc), "ram", OBJECT(&bmc->ram),
                                    &error_abort);
+    object_property_set_int(OBJECT(&bmc->soc), 0x120CE416, "hw-strap1",
+                            &error_abort);
     object_property_set_bool(OBJECT(&bmc->soc), true, "realized",
                              &error_abort);
+
+    palmetto_bmc_init_flashes(&bmc->soc.smc, "n25q256a", &error_abort);
+    palmetto_bmc_init_flashes(&bmc->soc.spi, "mx25l25635f", &error_abort);
+
+    /*
+     * Install first SMC/FMC flash content as a rom.
+     */
+    if (palmetto_bmc_has_flash0) {
+        AspeedSMCFlash *flash0 = &bmc->soc.smc.flashes[0];
+        MemoryRegion *flash0alias = g_new(MemoryRegion, 1);
+
+        memory_region_init_alias(flash0alias, OBJECT(&bmc->soc.smc),
+                                 "flash0alias", &flash0->mmio, 0,
+                                 flash0->size);
+
+        memory_region_add_subregion(get_system_memory(), 0, flash0alias);
+        palmetto_bmc_binfo.firmware_loaded = true;
+    }
 
     palmetto_bmc_binfo.kernel_filename = machine->kernel_filename;
     palmetto_bmc_binfo.initrd_filename = machine->initrd_filename;

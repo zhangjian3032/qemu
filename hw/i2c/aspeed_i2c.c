@@ -20,6 +20,7 @@
 
 #include "qemu/osdep.h"
 #include "hw/sysbus.h"
+#include "qemu/log.h"
 #include "hw/i2c/aspeed_i2c.h"
 
 /* I2C Global Register */
@@ -166,16 +167,6 @@ static uint64_t aspeed_i2c_bus_read(void *opaque, hwaddr offset,
                       "%s: Bad offset 0x%" HWADDR_PRIx "\n", __func__, offset);
         return -1;
     }
-}
-
-static inline uint64_t aspeed_i2c_bus_get_state(AspeedI2CBus *bus)
-{
-    return bus->cmd >> 19 & 0xF;
-}
-
-static inline void aspeed_i2c_bus_set_state(AspeedI2CBus *bus, uint64_t value)
-{
-    bus->cmd |= (value & 0xF) << 19;
 }
 
 static void aspeed_i2c_bus_handle_cmd(AspeedI2CBus *bus, uint64_t value)

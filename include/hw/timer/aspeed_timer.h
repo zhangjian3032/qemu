@@ -22,7 +22,6 @@
 #ifndef ASPEED_TIMER_H
 #define ASPEED_TIMER_H
 
-#include "qemu/typedefs.h"
 #include "qemu/timer.h"
 
 #define ASPEED_TIMER(obj) \

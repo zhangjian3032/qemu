@@ -16,6 +16,7 @@
 #include "sysemu/block-backend.h"
 #include "sysemu/blockdev.h"
 #include "sysemu/sysemu.h"
+#include "sysemu/kvm.h"
 #include "net/net.h"
 #include "hw/virtio/virtio.h"
 #include "hw/virtio/virtio-serial.h"
@@ -28,8 +29,8 @@
 #include "hw/s390x/adapter.h"
 #include "hw/s390x/s390_flic.h"
 
-#include "ioinst.h"
-#include "css.h"
+#include "hw/s390x/ioinst.h"
+#include "hw/s390x/css.h"
 #include "virtio-ccw.h"
 #include "trace.h"
 
@@ -736,14 +737,9 @@ static void virtio_sch_disable_cb(SubchDev *sch)
 
 static void virtio_ccw_device_realize(VirtioCcwDevice *dev, Error **errp)
 {
-    unsigned int cssid = 0;
-    unsigned int ssid = 0;
     unsigned int schid;
-    unsigned int devno;
-    bool have_devno = false;
     bool found = false;
     SubchDev *sch;
-    int num;
     Error *err = NULL;
     VirtIOCCWDeviceClass *k = VIRTIO_CCW_DEVICE_GET_CLASS(dev);
 
@@ -762,54 +758,44 @@ static void virtio_ccw_device_realize(VirtioCcwDevice *dev, Error **errp)
      * Use a device number if provided. Otherwise, fall back to subchannel
      * number.
      */
-    if (dev->bus_id) {
-        num = sscanf(dev->bus_id, "%x.%x.%04x", &cssid, &ssid, &devno);
-        if (num == 3) {
-            if ((cssid > MAX_CSSID) || (ssid > MAX_SSID)) {
-                error_setg(errp, "Invalid cssid or ssid: cssid %x, ssid %x",
-                           cssid, ssid);
-                goto out_err;
-            }
-            /* Enforce use of virtual cssid. */
-            if (cssid != VIRTUAL_CSSID) {
-                error_setg(errp, "cssid %x not valid for virtio devices",
-                           cssid);
-                goto out_err;
-            }
-            if (css_devno_used(cssid, ssid, devno)) {
-                error_setg(errp, "Device %x.%x.%04x already exists",
-                           cssid, ssid, devno);
-                goto out_err;
-            }
-            sch->cssid = cssid;
-            sch->ssid = ssid;
-            sch->devno = devno;
-            have_devno = true;
-        } else {
-            error_setg(errp, "Malformed devno parameter '%s'", dev->bus_id);
+    if (dev->bus_id.valid) {
+        /* Enforce use of virtual cssid. */
+        if (dev->bus_id.cssid != VIRTUAL_CSSID) {
+            error_setg(errp, "cssid %x not valid for virtio devices",
+                       dev->bus_id.cssid);
             goto out_err;
         }
-    }
+        if (css_devno_used(dev->bus_id.cssid, dev->bus_id.ssid,
+                           dev->bus_id.devid)) {
+                error_setg(errp, "Device %x.%x.%04x already exists",
+                           dev->bus_id.cssid, dev->bus_id.ssid,
+                           dev->bus_id.devid);
+                goto out_err;
+        }
+        sch->cssid = dev->bus_id.cssid;
+        sch->ssid = dev->bus_id.ssid;
+        sch->devno = dev->bus_id.devid;
 
-    /* Find the next free id. */
-    if (have_devno) {
+        /* Find the next free id. */
         for (schid = 0; schid <= MAX_SCHID; schid++) {
-            if (!css_find_subch(1, cssid, ssid, schid)) {
+            if (!css_find_subch(1, sch->cssid, sch->ssid, schid)) {
                 sch->schid = schid;
-                css_subch_assign(cssid, ssid, schid, devno, sch);
+                css_subch_assign(sch->cssid, sch->ssid, sch->schid,
+                                 sch->devno, sch);
                 found = true;
                 break;
             }
         }
         if (!found) {
             error_setg(errp, "No free subchannel found for %x.%x.%04x",
-                       cssid, ssid, devno);
+                       sch->cssid, sch->ssid, sch->devno);
             goto out_err;
         }
-        trace_virtio_ccw_new_device(cssid, ssid, schid, devno,
-                                    "user-configured");
+        trace_virtio_ccw_new_device(sch->cssid, sch->ssid, sch->schid,
+                                    sch->devno, "user-configured");
     } else {
-        cssid = VIRTUAL_CSSID;
+        unsigned int cssid = VIRTUAL_CSSID, ssid, devno;
+
         for (ssid = 0; ssid <= MAX_SSID; ssid++) {
             for (schid = 0; schid <= MAX_SCHID; schid++) {
                 if (!css_find_subch(1, cssid, ssid, schid)) {
@@ -867,7 +853,7 @@ static void virtio_ccw_device_realize(VirtioCcwDevice *dev, Error **errp)
     }
     if (err) {
         error_propagate(errp, err);
-        css_subch_assign(cssid, ssid, schid, devno, NULL);
+        css_subch_assign(sch->cssid, sch->ssid, sch->schid, sch->devno, NULL);
         goto out_err;
     }
 
@@ -898,15 +884,11 @@ static void virtio_ccw_net_realize(VirtioCcwDevice *ccw_dev, Error **errp)
     DeviceState *qdev = DEVICE(ccw_dev);
     VirtIONetCcw *dev = VIRTIO_NET_CCW(ccw_dev);
     DeviceState *vdev = DEVICE(&dev->vdev);
-    Error *err = NULL;
 
     virtio_net_set_netclient_name(&dev->vdev, qdev->id,
                                   object_get_typename(OBJECT(qdev)));
     qdev_set_parent_bus(vdev, BUS(&ccw_dev->bus));
-    object_property_set_bool(OBJECT(vdev), true, "realized", &err);
-    if (err) {
-        error_propagate(errp, err);
-    }
+    object_property_set_bool(OBJECT(vdev), true, "realized", errp);
 }
 
 static void virtio_ccw_net_instance_init(Object *obj)
@@ -923,13 +905,9 @@ static void virtio_ccw_blk_realize(VirtioCcwDevice *ccw_dev, Error **errp)
 {
     VirtIOBlkCcw *dev = VIRTIO_BLK_CCW(ccw_dev);
     DeviceState *vdev = DEVICE(&dev->vdev);
-    Error *err = NULL;
 
     qdev_set_parent_bus(vdev, BUS(&ccw_dev->bus));
-    object_property_set_bool(OBJECT(vdev), true, "realized", &err);
-    if (err) {
-        error_propagate(errp, err);
-    }
+    object_property_set_bool(OBJECT(vdev), true, "realized", errp);
 }
 
 static void virtio_ccw_blk_instance_init(Object *obj)
@@ -949,7 +927,6 @@ static void virtio_ccw_serial_realize(VirtioCcwDevice *ccw_dev, Error **errp)
     VirtioSerialCcw *dev = VIRTIO_SERIAL_CCW(ccw_dev);
     DeviceState *vdev = DEVICE(&dev->vdev);
     DeviceState *proxy = DEVICE(ccw_dev);
-    Error *err = NULL;
     char *bus_name;
 
     /*
@@ -963,10 +940,7 @@ static void virtio_ccw_serial_realize(VirtioCcwDevice *ccw_dev, Error **errp)
     }
 
     qdev_set_parent_bus(vdev, BUS(&ccw_dev->bus));
-    object_property_set_bool(OBJECT(vdev), true, "realized", &err);
-    if (err) {
-        error_propagate(errp, err);
-    }
+    object_property_set_bool(OBJECT(vdev), true, "realized", errp);
 }
 
 
@@ -982,13 +956,9 @@ static void virtio_ccw_balloon_realize(VirtioCcwDevice *ccw_dev, Error **errp)
 {
     VirtIOBalloonCcw *dev = VIRTIO_BALLOON_CCW(ccw_dev);
     DeviceState *vdev = DEVICE(&dev->vdev);
-    Error *err = NULL;
 
     qdev_set_parent_bus(vdev, BUS(&ccw_dev->bus));
-    object_property_set_bool(OBJECT(vdev), true, "realized", &err);
-    if (err) {
-        error_propagate(errp, err);
-    }
+    object_property_set_bool(OBJECT(vdev), true, "realized", errp);
 }
 
 static void virtio_ccw_balloon_instance_init(Object *obj)
@@ -1009,7 +979,6 @@ static void virtio_ccw_scsi_realize(VirtioCcwDevice *ccw_dev, Error **errp)
     VirtIOSCSICcw *dev = VIRTIO_SCSI_CCW(ccw_dev);
     DeviceState *vdev = DEVICE(&dev->vdev);
     DeviceState *qdev = DEVICE(ccw_dev);
-    Error *err = NULL;
     char *bus_name;
 
     /*
@@ -1023,10 +992,7 @@ static void virtio_ccw_scsi_realize(VirtioCcwDevice *ccw_dev, Error **errp)
     }
 
     qdev_set_parent_bus(vdev, BUS(&ccw_dev->bus));
-    object_property_set_bool(OBJECT(vdev), true, "realized", &err);
-    if (err) {
-        error_propagate(errp, err);
-    }
+    object_property_set_bool(OBJECT(vdev), true, "realized", errp);
 }
 
 static void virtio_ccw_scsi_instance_init(Object *obj)
@@ -1044,13 +1010,9 @@ static void vhost_ccw_scsi_realize(VirtioCcwDevice *ccw_dev, Error **errp)
 {
     VHostSCSICcw *dev = VHOST_SCSI_CCW(ccw_dev);
     DeviceState *vdev = DEVICE(&dev->vdev);
-    Error *err = NULL;
 
     qdev_set_parent_bus(vdev, BUS(&ccw_dev->bus));
-    object_property_set_bool(OBJECT(vdev), true, "realized", &err);
-    if (err) {
-        error_propagate(errp, err);
-    }
+    object_property_set_bool(OBJECT(vdev), true, "realized", errp);
 }
 
 static void vhost_ccw_scsi_instance_init(Object *obj)
@@ -1105,6 +1067,7 @@ static uint8_t virtio_set_ind_atomic(SubchDev *sch, uint64_t ind_loc,
         ind_old = *ind_addr;
         ind_new = ind_old | to_be_set;
     } while (atomic_cmpxchg(ind_addr, ind_old, ind_new) != ind_old);
+    trace_virtio_ccw_set_ind(ind_loc, ind_old, ind_new);
     cpu_physical_memory_unmap(ind_addr, len, 1, len);
 
     return ind_old;
@@ -1475,7 +1438,7 @@ static void virtio_ccw_device_plugged(DeviceState *d, Error **errp)
     int n = virtio_get_num_queues(vdev);
 
     if (virtio_get_num_queues(vdev) > VIRTIO_CCW_QUEUE_MAX) {
-        error_setg(errp, "The nubmer of virtqueues %d "
+        error_setg(errp, "The number of virtqueues %d "
                    "exceeds ccw limit %d", n,
                    VIRTIO_CCW_QUEUE_MAX);
         return;
@@ -1515,7 +1478,7 @@ static void virtio_ccw_device_unplugged(DeviceState *d)
 /**************** Virtio-ccw Bus Device Descriptions *******************/
 
 static Property virtio_ccw_net_properties[] = {
-    DEFINE_PROP_STRING("devno", VirtioCcwDevice, bus_id),
+    DEFINE_PROP_CSS_DEV_ID("devno", VirtioCcwDevice, bus_id),
     DEFINE_PROP_BIT("ioeventfd", VirtioCcwDevice, flags,
                     VIRTIO_CCW_FLAG_USE_IOEVENTFD_BIT, true),
     DEFINE_PROP_UINT32("max_revision", VirtioCcwDevice, max_rev,
@@ -1544,7 +1507,7 @@ static const TypeInfo virtio_ccw_net = {
 };
 
 static Property virtio_ccw_blk_properties[] = {
-    DEFINE_PROP_STRING("devno", VirtioCcwDevice, bus_id),
+    DEFINE_PROP_CSS_DEV_ID("devno", VirtioCcwDevice, bus_id),
     DEFINE_PROP_BIT("ioeventfd", VirtioCcwDevice, flags,
                     VIRTIO_CCW_FLAG_USE_IOEVENTFD_BIT, true),
     DEFINE_PROP_UINT32("max_revision", VirtioCcwDevice, max_rev,
@@ -1573,7 +1536,7 @@ static const TypeInfo virtio_ccw_blk = {
 };
 
 static Property virtio_ccw_serial_properties[] = {
-    DEFINE_PROP_STRING("devno", VirtioCcwDevice, bus_id),
+    DEFINE_PROP_CSS_DEV_ID("devno", VirtioCcwDevice, bus_id),
     DEFINE_PROP_BIT("ioeventfd", VirtioCcwDevice, flags,
                     VIRTIO_CCW_FLAG_USE_IOEVENTFD_BIT, true),
     DEFINE_PROP_UINT32("max_revision", VirtioCcwDevice, max_rev,
@@ -1602,7 +1565,7 @@ static const TypeInfo virtio_ccw_serial = {
 };
 
 static Property virtio_ccw_balloon_properties[] = {
-    DEFINE_PROP_STRING("devno", VirtioCcwDevice, bus_id),
+    DEFINE_PROP_CSS_DEV_ID("devno", VirtioCcwDevice, bus_id),
     DEFINE_PROP_BIT("ioeventfd", VirtioCcwDevice, flags,
                     VIRTIO_CCW_FLAG_USE_IOEVENTFD_BIT, true),
     DEFINE_PROP_UINT32("max_revision", VirtioCcwDevice, max_rev,
@@ -1631,7 +1594,7 @@ static const TypeInfo virtio_ccw_balloon = {
 };
 
 static Property virtio_ccw_scsi_properties[] = {
-    DEFINE_PROP_STRING("devno", VirtioCcwDevice, bus_id),
+    DEFINE_PROP_CSS_DEV_ID("devno", VirtioCcwDevice, bus_id),
     DEFINE_PROP_BIT("ioeventfd", VirtioCcwDevice, flags,
                     VIRTIO_CCW_FLAG_USE_IOEVENTFD_BIT, true),
     DEFINE_PROP_UINT32("max_revision", VirtioCcwDevice, max_rev,
@@ -1661,7 +1624,7 @@ static const TypeInfo virtio_ccw_scsi = {
 
 #ifdef CONFIG_VHOST_SCSI
 static Property vhost_ccw_scsi_properties[] = {
-    DEFINE_PROP_STRING("devno", VirtioCcwDevice, bus_id),
+    DEFINE_PROP_CSS_DEV_ID("devno", VirtioCcwDevice, bus_id),
     DEFINE_PROP_UINT32("max_revision", VirtioCcwDevice, max_rev,
                        VIRTIO_CCW_MAX_REV),
     DEFINE_PROP_END_OF_LIST(),
@@ -1699,7 +1662,7 @@ static void virtio_ccw_rng_instance_init(Object *obj)
 }
 
 static Property virtio_ccw_rng_properties[] = {
-    DEFINE_PROP_STRING("devno", VirtioCcwDevice, bus_id),
+    DEFINE_PROP_CSS_DEV_ID("devno", VirtioCcwDevice, bus_id),
     DEFINE_PROP_BIT("ioeventfd", VirtioCcwDevice, flags,
                     VIRTIO_CCW_FLAG_USE_IOEVENTFD_BIT, true),
     DEFINE_PROP_UINT32("max_revision", VirtioCcwDevice, max_rev,
@@ -1855,7 +1818,7 @@ static const TypeInfo virtio_ccw_bus_info = {
 
 #ifdef CONFIG_VIRTFS
 static Property virtio_ccw_9p_properties[] = {
-    DEFINE_PROP_STRING("devno", VirtioCcwDevice, bus_id),
+    DEFINE_PROP_CSS_DEV_ID("devno", VirtioCcwDevice, bus_id),
     DEFINE_PROP_BIT("ioeventfd", VirtioCcwDevice, flags,
             VIRTIO_CCW_FLAG_USE_IOEVENTFD_BIT, true),
     DEFINE_PROP_UINT32("max_revision", VirtioCcwDevice, max_rev,
@@ -1867,13 +1830,9 @@ static void virtio_ccw_9p_realize(VirtioCcwDevice *ccw_dev, Error **errp)
 {
     V9fsCCWState *dev = VIRTIO_9P_CCW(ccw_dev);
     DeviceState *vdev = DEVICE(&dev->vdev);
-    Error *err = NULL;
 
     qdev_set_parent_bus(vdev, BUS(&ccw_dev->bus));
-    object_property_set_bool(OBJECT(vdev), true, "realized", &err);
-    if (err) {
-        error_propagate(errp, err);
-    }
+    object_property_set_bool(OBJECT(vdev), true, "realized", errp);
 }
 
 static void virtio_ccw_9p_class_init(ObjectClass *klass, void *data)

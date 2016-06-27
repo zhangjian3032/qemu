@@ -6,6 +6,7 @@
  */
 
 #include "qemu/osdep.h"
+#include "qemu/log.h"
 #include "sysemu/watchdog.h"
 #include "hw/sysbus.h"
 #include "qemu/timer.h"

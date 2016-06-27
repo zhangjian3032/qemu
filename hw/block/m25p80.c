@@ -27,6 +27,10 @@
 #include "sysemu/blockdev.h"
 #include "hw/ssi/ssi.h"
 #include "qemu/bitops.h"
+#include "qemu/log.h"
+#include "qapi/error.h"
+#include "hw/block/flash.h"
+#include "sysemu/sysemu.h"
 
 #ifndef M25P80_ERR_DEBUG
 #define M25P80_ERR_DEBUG 0
@@ -156,6 +160,7 @@ static const FlashPartInfo known_devices[] = {
     { INFO("mx25l12805d", 0xc22018,      0,  64 << 10, 256, 0) },
     { INFO("mx25l12855e", 0xc22618,      0,  64 << 10, 256, 0) },
     { INFO("mx25l25635e", 0xc22019,      0,  64 << 10, 512, 0) },
+    { INFO("mx25l25635f", 0xc22019,      0,  64 << 10, 512, 0) },
     { INFO("mx25l25655e", 0xc22619,      0,  64 << 10, 512, 0) },
 
     /* Micron */
@@ -251,6 +256,7 @@ typedef enum {
     WRDI = 0x4,
     RDSR = 0x5,
     WREN = 0x6,
+    RDCR = 0x15,
     JEDEC_READ = 0x9f,
     BULK_ERASE = 0xc7,
     READ_FSR = 0x70,
@@ -333,7 +339,7 @@ typedef struct Flash {
     int64_t dirty_page;
 
     const FlashPartInfo *pi;
-
+    VMChangeStateEntry *vmstate;
 } Flash;
 
 typedef struct M25P80Class {
@@ -349,48 +355,25 @@ typedef struct M25P80Class {
 #define M25P80_GET_CLASS(obj) \
      OBJECT_GET_CLASS(M25P80Class, (obj), TYPE_M25P80)
 
-static void blk_sync_complete(void *opaque, int ret)
-{
-    /* do nothing. Masters do not directly interact with the backing store,
-     * only the working copy so no mutexing required.
-     */
-}
-
 static void flash_sync_page(Flash *s, int page)
 {
-    int blk_sector, nb_sectors;
-    QEMUIOVector iov;
-
     if (!s->blk || blk_is_read_only(s->blk)) {
         return;
     }
 
-    blk_sector = (page * s->pi->page_size) / BDRV_SECTOR_SIZE;
-    nb_sectors = DIV_ROUND_UP(s->pi->page_size, BDRV_SECTOR_SIZE);
-    qemu_iovec_init(&iov, 1);
-    qemu_iovec_add(&iov, s->storage + blk_sector * BDRV_SECTOR_SIZE,
-                   nb_sectors * BDRV_SECTOR_SIZE);
-    blk_aio_writev(s->blk, blk_sector, &iov, nb_sectors, blk_sync_complete,
-                   NULL);
+    blk_pwrite(s->blk, page * s->pi->page_size,
+               s->storage + page * s->pi->page_size,
+               s->pi->page_size, 0);
 }
 
 static inline void flash_sync_area(Flash *s, int64_t off, int64_t len)
 {
-    int64_t start, end, nb_sectors;
-    QEMUIOVector iov;
-
     if (!s->blk || blk_is_read_only(s->blk)) {
         return;
     }
 
     assert(!(len % BDRV_SECTOR_SIZE));
-    start = off / BDRV_SECTOR_SIZE;
-    end = (off + len) / BDRV_SECTOR_SIZE;
-    nb_sectors = end - start;
-    qemu_iovec_init(&iov, 1);
-    qemu_iovec_add(&iov, s->storage + (start * BDRV_SECTOR_SIZE),
-                                        nb_sectors * BDRV_SECTOR_SIZE);
-    blk_aio_writev(s->blk, start, &iov, nb_sectors, blk_sync_complete, NULL);
+    blk_pwrite(s->blk, off, s->storage + off, len, 0);
 }
 
 static void flash_erase(Flash *s, int offset, FlashCMD cmd)
@@ -690,6 +673,9 @@ static void decode_new_cmd(Flash *s, uint32_t value)
             s->pos = 0;
             s->len = 0;
             s->state = STATE_COLLECTING_DATA;
+            if (!strcmp(s->pi->part_name, "mx25l25635f")) {
+                s->needed_bytes = 2;
+            }
         }
         break;
 
@@ -702,6 +688,13 @@ static void decode_new_cmd(Flash *s, uint32_t value)
 
     case RDSR:
         s->data[0] = (!!s->write_enable) << 1;
+        s->pos = 0;
+        s->len = 1;
+        s->state = STATE_READING_DATA;
+        break;
+
+    case RDCR:
+        s->data[0] = (!!s->four_bytes_address_mode) << 5;
         s->pos = 0;
         s->len = 1;
         s->state = STATE_READING_DATA;
@@ -885,9 +878,8 @@ static uint32_t m25p80_transfer8(SSISlave *ss, uint32_t tx)
     return r;
 }
 
-static int m25p80_init(SSISlave *ss)
+static void m25p80_realize(SSISlave *ss, Error **errp)
 {
-    DriveInfo *dinfo;
     Flash *s = M25P80(ss);
     M25P80Class *mc = M25P80_GET_CLASS(s);
 
@@ -896,29 +888,23 @@ static int m25p80_init(SSISlave *ss)
     s->size = s->pi->sector_size * s->pi->n_sectors;
     s->dirty_page = -1;
 
-    /* FIXME use a qdev drive property instead of drive_get_next() */
-    dinfo = drive_get_next(IF_MTD);
-
-    if (dinfo) {
+    if (s->blk) {
         DB_PRINT_L(0, "Binding to IF_MTD drive\n");
-        s->blk = blk_by_legacy_dinfo(dinfo);
-        blk_attach_dev_nofail(s->blk, s);
 
-        s->storage = blk_blockalign(s->blk, s->size);
+        /* using an external storage. see m25p80_create_rom() */
+        if (!s->storage) {
+            s->storage = blk_blockalign(s->blk, s->size);
+        }
 
-        /* FIXME: Move to late init */
-        if (blk_read(s->blk, 0, s->storage,
-                     DIV_ROUND_UP(s->size, BDRV_SECTOR_SIZE))) {
-            fprintf(stderr, "Failed to initialize SPI flash!\n");
-            return 1;
+        if (blk_pread(s->blk, 0, s->storage, s->size) != s->size) {
+            error_setg(errp, "failed to read the initial flash content");
+            return;
         }
     } else {
         DB_PRINT_L(0, "No BDRV - binding to RAM\n");
         s->storage = blk_blockalign(NULL, s->size);
         memset(s->storage, 0xFF, s->size);
     }
-
-    return 0;
 }
 
 static void m25p80_reset(DeviceState *d)
@@ -935,14 +921,17 @@ static void m25p80_pre_save(void *opaque)
 
 static Property m25p80_properties[] = {
     DEFINE_PROP_UINT32("nonvolatile-cfg", Flash, nonvolatile_cfg, 0x8FFF),
+    DEFINE_PROP_DRIVE("drive", Flash, blk),
     DEFINE_PROP_END_OF_LIST(),
 };
+static int m25p80_post_load(void *opaque, int version_id);
 
 static const VMStateDescription vmstate_m25p80 = {
-    .name = "xilinx_spi",
+    .name = "m25p80",
     .version_id = 2,
     .minimum_version_id = 1,
     .pre_save = m25p80_pre_save,
+    .post_load = m25p80_post_load,
     .fields = (VMStateField[]) {
         VMSTATE_UINT8(state, Flash),
         VMSTATE_UINT8_ARRAY(data, Flash, 16),
@@ -968,7 +957,7 @@ static void m25p80_class_init(ObjectClass *klass, void *data)
     SSISlaveClass *k = SSI_SLAVE_CLASS(klass);
     M25P80Class *mc = M25P80_CLASS(klass);
 
-    k->init = m25p80_init;
+    k->realize = m25p80_realize;
     k->transfer = m25p80_transfer8;
     k->set_cs = m25p80_cs;
     k->cs_polarity = SSI_CS_LOW;
@@ -1003,3 +992,30 @@ static void m25p80_register_types(void)
 }
 
 type_init(m25p80_register_types)
+
+void m25p80_set_rom_storage(DeviceState *dev, MemoryRegion *rom)
+{
+    Flash *s = M25P80(dev);
+
+    s->storage = memory_region_get_ram_ptr(rom);
+}
+
+static void postload_update_cb(void *opaque, int running, RunState state)
+{
+    Flash *s = opaque;
+
+    /* This is called after bdrv_invalidate_cache_all.  */
+    qemu_del_vm_change_state_handler(s->vmstate);
+    s->vmstate = NULL;
+    flash_sync_area(s, 0, s->size);
+}
+
+static int m25p80_post_load(void *opaque, int version_id)
+{
+    Flash *s = opaque;
+
+    if (!s->blk) {
+        s->vmstate = qemu_add_vm_change_state_handler(postload_update_cb, s);
+    }
+    return 0;
+}

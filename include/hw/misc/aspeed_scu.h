@@ -16,7 +16,7 @@
 #define TYPE_ASPEED_SCU "aspeed.scu"
 #define ASPEED_SCU(obj) OBJECT_CHECK(AspeedSCUState, (obj), TYPE_ASPEED_SCU)
 
-#define ASPEED_SCU_NR_REGS (0x1B4 >> 2)
+#define ASPEED_SCU_NR_REGS (0x1A8 >> 2)
 
 typedef struct AspeedSCUState {
     /*< private >*/
@@ -26,17 +26,9 @@ typedef struct AspeedSCUState {
     MemoryRegion iomem;
 
     uint32_t regs[ASPEED_SCU_NR_REGS];
-
-    /* Reset properties */
-    uint32_t scu04_rst;
-    uint32_t scu08_rst;
-    uint32_t scu0c_rst;
-    uint32_t scu24_rst;
-    uint32_t scu70_rst;
-    uint32_t scu7c_rst;
-    uint32_t scu88_rst;
-    uint32_t scu8c_rst;
-    uint32_t scu9c_rst;
+    uint32_t silicon_rev;
+    uint32_t hw_strap1;
+    uint32_t hw_strap2;
 } AspeedSCUState;
 
 #endif /* ASPEED_SCU_H */

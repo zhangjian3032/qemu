@@ -20,6 +20,7 @@
 #include "cpu.h"
 #include "qemu/host-utils.h"
 #include "exec/helper-proto.h"
+#include "exec/exec-all.h"
 #include "exec/cpu_ldst.h"
 #include "sysemu/kvm.h"
 
@@ -132,10 +133,8 @@ static inline uint64_t get_HILO(CPUMIPSState *env)
 
 static inline target_ulong set_HIT0_LO(CPUMIPSState *env, uint64_t HILO)
 {
-    target_ulong tmp;
     env->active_tc.LO[0] = (int32_t)(HILO & 0xFFFFFFFF);
-    tmp = env->active_tc.HI[0] = (int32_t)(HILO >> 32);
-    return tmp;
+    return env->active_tc.HI[0] = (int32_t)(HILO >> 32);
 }
 
 static inline target_ulong set_HI_LOT0(CPUMIPSState *env, uint64_t HILO)
@@ -581,7 +580,7 @@ static bool mips_vp_is_wfi(MIPSCPU *c)
 
 static inline void mips_vpe_wake(MIPSCPU *c)
 {
-    /* Dont set ->halted = 0 directly, let it be done via cpu_has_work
+    /* Don't set ->halted = 0 directly, let it be done via cpu_has_work
        because there might be other conditions that state that c should
        be sleeping.  */
     cpu_interrupt(CPU(c), CPU_INTERRUPT_WAKE);
