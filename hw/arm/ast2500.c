@@ -72,6 +72,11 @@ static void ast2500_init(Object *obj)
     object_initialize(&s->scu, sizeof(s->scu), TYPE_ASPEED_SCU);
     object_property_add_child(obj, "scu", OBJECT(&s->scu), NULL);
     qdev_set_parent_bus(DEVICE(&s->scu), sysbus_get_default());
+    qdev_prop_set_uint32(DEVICE(&s->scu), "silicon-rev", 0x04010303U);
+    object_property_add_alias(obj, "hw-strap1", OBJECT(&s->scu),
+                              "hw-strap1", &error_abort);
+    object_property_add_alias(obj, "hw-strap2", OBJECT(&s->scu),
+                              "hw-strap2", &error_abort);
 }
 
 static void ast2500_realize(DeviceState *dev, Error **errp)
@@ -121,16 +126,6 @@ static void ast2500_realize(DeviceState *dev, Error **errp)
     }
 
     /* SCU */
-    object_property_set_int(OBJECT(&s->scu), 0xEFF43E8BU, "scu0c", &err);
-    object_property_set_int(OBJECT(&s->scu), 0x93000400U, "scu24", &err);
-    /* SCU70 bit 23: 0 24Mhz. bit 11:9: 0b001 AXI:ABH ratio 2:1 */
-    object_property_set_int(OBJECT(&s->scu), 0x00000200U, "scu70", &err);
-    /* AST2500 revision A1 */
-    object_property_set_int(OBJECT(&s->scu), 0x04010303U, "scu7c", &err);
-    object_property_set_int(OBJECT(&s->scu), 0x03000000U, "scu88", &err);
-    object_property_set_int(OBJECT(&s->scu), 0x00000000U, "scu8c", &err);
-    object_property_set_int(OBJECT(&s->scu), 0x023FFFF3U, "scu9c", &err);
-
     object_property_set_bool(OBJECT(&s->scu), true, "realized", &err);
     if (err) {
         error_propagate(errp, err);
