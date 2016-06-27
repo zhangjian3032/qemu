@@ -351,40 +351,25 @@ typedef struct M25P80Class {
 #define M25P80_GET_CLASS(obj) \
      OBJECT_GET_CLASS(M25P80Class, (obj), TYPE_M25P80)
 
-static void blk_sync_complete(void *opaque, int ret)
-{
-    /* do nothing. Masters do not directly interact with the backing store,
-     * only the working copy so no mutexing required.
-     */
-}
-
 static void flash_sync_page(Flash *s, int page)
 {
-    QEMUIOVector iov;
-
     if (!s->blk || blk_is_read_only(s->blk)) {
         return;
     }
 
-    qemu_iovec_init(&iov, 1);
-    qemu_iovec_add(&iov, s->storage + page * s->pi->page_size,
-                   s->pi->page_size);
-    blk_aio_pwritev(s->blk, page * s->pi->page_size, &iov, 0,
-                    blk_sync_complete, NULL);
+    blk_pwrite(s->blk, page * s->pi->page_size,
+               s->storage + page * s->pi->page_size,
+               s->pi->page_size, 0);
 }
 
 static inline void flash_sync_area(Flash *s, int64_t off, int64_t len)
 {
-    QEMUIOVector iov;
-
     if (!s->blk || blk_is_read_only(s->blk)) {
         return;
     }
 
     assert(!(len % BDRV_SECTOR_SIZE));
-    qemu_iovec_init(&iov, 1);
-    qemu_iovec_add(&iov, s->storage + off, len);
-    blk_aio_pwritev(s->blk, off, &iov, 0, blk_sync_complete, NULL);
+    blk_pwrite(s->blk, off, s->storage + off, len, 0);
 }
 
 static void flash_erase(Flash *s, int offset, FlashCMD cmd)
