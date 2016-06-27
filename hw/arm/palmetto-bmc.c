@@ -83,7 +83,7 @@ static void palmetto_bmc_init(MachineState *machine)
                              &error_abort);
 
     palmetto_bmc_init_flashes(&bmc->soc.smc, "n25q256a", &error_abort);
-    palmetto_bmc_init_flashes(&bmc->soc.spi, "mx25l25635e", &error_abort);
+    palmetto_bmc_init_flashes(&bmc->soc.spi, "mx25l25635f", &error_abort);
 
     /*
      * Install first SMC/FMC flash content as a rom.
