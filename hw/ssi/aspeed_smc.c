@@ -306,6 +306,9 @@ static void aspeed_smc_reset(DeviceState *d)
 
     memset(s->regs, 0, sizeof s->regs);
 
+    /* Pretend DMA is done (u-boot initialization) */
+    s->regs[R_INTR_CTRL] = INTR_CTRL_DMA_STATUS;
+
     /* Unselect all slaves */
     for (i = 0; i < s->num_cs; ++i) {
         s->regs[s->r_ctrl0 + i] |= CTRL_CE_STOP_ACTIVE;
@@ -317,6 +320,7 @@ static void aspeed_smc_reset(DeviceState *d)
 static bool aspeed_smc_is_implemented(AspeedSMCState *s, hwaddr addr)
 {
     return (addr == s->r_conf || addr == s->r_timings || addr == s->r_ce_ctrl ||
+            addr == R_INTR_CTRL ||
             (addr >= s->r_ctrl0 && addr < s->r_ctrl0 + s->num_cs));
 }
 
