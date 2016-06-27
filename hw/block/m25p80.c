@@ -159,6 +159,7 @@ static const FlashPartInfo known_devices[] = {
     { INFO("mx25l12805d", 0xc22018,      0,  64 << 10, 256, 0) },
     { INFO("mx25l12855e", 0xc22618,      0,  64 << 10, 256, 0) },
     { INFO("mx25l25635e", 0xc22019,      0,  64 << 10, 512, 0) },
+    { INFO("mx25l25635f", 0xc22019,      0,  64 << 10, 512, 0) },
     { INFO("mx25l25655e", 0xc22619,      0,  64 << 10, 512, 0) },
 
     /* Micron */
@@ -671,6 +672,9 @@ static void decode_new_cmd(Flash *s, uint32_t value)
             s->pos = 0;
             s->len = 0;
             s->state = STATE_COLLECTING_DATA;
+            if (!strcmp(s->pi->part_name, "mx25l25635f")) {
+                s->needed_bytes = 2;
+            }
         }
         break;
 
