@@ -19,6 +19,7 @@
 #include "hw/char/serial.h"
 #include "qemu/log.h"
 #include "hw/i2c/aspeed_i2c.h"
+#include "net/net.h"
 
 #define AST2400_UART_5_BASE      0x00184000
 #define AST2400_IOMEM_SIZE       0x00200000
@@ -30,6 +31,8 @@
 #define AST2400_SCU_BASE         0x1E6E2000
 #define AST2400_TIMER_BASE       0x1E782000
 #define AST2400_I2C_BASE         0x1E78A000
+#define AST2400_ETH1_BASE        0x1E660000
+#define AST2400_ETH2_BASE        0x1E680000
 
 #define AST2400_FMC_FLASH_BASE   0x20000000
 #define AST2400_SPI_FLASH_BASE   0x30000000
@@ -99,6 +102,10 @@ static void ast2400_init(Object *obj)
     object_initialize(&s->spi, sizeof(s->spi), "aspeed.smc.spi");
     object_property_add_child(obj, "spi", OBJECT(&s->spi), NULL);
     qdev_set_parent_bus(DEVICE(&s->spi), sysbus_get_default());
+
+    object_initialize(&s->ftgmac100, sizeof(s->ftgmac100), TYPE_FTGMAC100);
+    object_property_add_child(obj, "ftgmac100", OBJECT(&s->ftgmac100), NULL);
+    qdev_set_parent_bus(DEVICE(&s->ftgmac100), sysbus_get_default());
 }
 
 static void ast2400_realize(DeviceState *dev, Error **errp)
@@ -196,6 +203,17 @@ static void ast2400_realize(DeviceState *dev, Error **errp)
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->spi), 0, AST2400_SPI_BASE);
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->spi), 1, AST2400_SPI_FLASH_BASE);
+
+    /* Net */
+    qdev_set_nic_properties(DEVICE(&s->ftgmac100), &nd_table[0]);
+    object_property_set_bool(OBJECT(&s->ftgmac100), true, "realized", &err);
+    if (err) {
+        error_propagate(errp, err);
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->ftgmac100), 0, AST2400_ETH1_BASE);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->ftgmac100), 0,
+                       qdev_get_gpio_in(DEVICE(&s->vic), 2));
 }
 
 static void ast2400_class_init(ObjectClass *oc, void *data)
