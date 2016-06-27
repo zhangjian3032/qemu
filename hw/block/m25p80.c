@@ -30,6 +30,7 @@
 #include "qemu/log.h"
 #include "qapi/error.h"
 #include "hw/block/flash.h"
+#include "sysemu/sysemu.h"
 
 #ifndef M25P80_ERR_DEBUG
 #define M25P80_ERR_DEBUG 0
@@ -338,7 +339,7 @@ typedef struct Flash {
     int64_t dirty_page;
 
     const FlashPartInfo *pi;
-
+    VMChangeStateEntry *vmstate;
 } Flash;
 
 typedef struct M25P80Class {
@@ -923,12 +924,14 @@ static Property m25p80_properties[] = {
     DEFINE_PROP_DRIVE("drive", Flash, blk),
     DEFINE_PROP_END_OF_LIST(),
 };
+static int m25p80_post_load(void *opaque, int version_id);
 
 static const VMStateDescription vmstate_m25p80 = {
-    .name = "xilinx_spi",
+    .name = "m25p80",
     .version_id = 2,
     .minimum_version_id = 1,
     .pre_save = m25p80_pre_save,
+    .post_load = m25p80_post_load,
     .fields = (VMStateField[]) {
         VMSTATE_UINT8(state, Flash),
         VMSTATE_UINT8_ARRAY(data, Flash, 16),
@@ -995,4 +998,24 @@ void m25p80_set_rom_storage(DeviceState *dev, MemoryRegion *rom)
     Flash *s = M25P80(dev);
 
     s->storage = memory_region_get_ram_ptr(rom);
+}
+
+static void postload_update_cb(void *opaque, int running, RunState state)
+{
+    Flash *s = opaque;
+
+    /* This is called after bdrv_invalidate_cache_all.  */
+    qemu_del_vm_change_state_handler(s->vmstate);
+    s->vmstate = NULL;
+    flash_sync_area(s, 0, s->size);
+}
+
+static int m25p80_post_load(void *opaque, int version_id)
+{
+    Flash *s = opaque;
+
+    if (!s->blk) {
+        s->vmstate = qemu_add_vm_change_state_handler(postload_update_cb, s);
+    }
+    return 0;
 }
