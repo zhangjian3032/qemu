@@ -74,6 +74,8 @@ static void palmetto_bmc_init(MachineState *machine)
                                    &error_abort);
     object_property_set_int(OBJECT(&bmc->soc), 0x120CE416, "hw-strap1",
                             &error_abort);
+    object_property_set_int(OBJECT(&bmc->soc), AST2400_A0_SILICON_REV,
+                            "silicon-rev", &error_abort);
     object_property_set_bool(OBJECT(&bmc->soc), true, "realized",
                              &error_abort);
 

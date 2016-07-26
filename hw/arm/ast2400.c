@@ -84,8 +84,8 @@ static void ast2400_init(Object *obj)
     object_initialize(&s->scu, sizeof(s->scu), TYPE_ASPEED_SCU);
     object_property_add_child(obj, "scu", OBJECT(&s->scu), NULL);
     qdev_set_parent_bus(DEVICE(&s->scu), sysbus_get_default());
-    qdev_prop_set_uint32(DEVICE(&s->scu), "silicon-rev",
-                         AST2400_A0_SILICON_REV);
+    object_property_add_alias(obj, "silicon-rev", OBJECT(&s->scu),
+                              "silicon-rev", &error_abort);
     object_property_add_alias(obj, "hw-strap1", OBJECT(&s->scu),
                               "hw-strap1", &error_abort);
     object_property_add_alias(obj, "hw-strap2", OBJECT(&s->scu),
@@ -102,8 +102,6 @@ static void ast2400_init(Object *obj)
     object_initialize(&s->sdmc, sizeof(s->sdmc), TYPE_ASPEED_SDMC);
     object_property_add_child(obj, "sdmc", OBJECT(&s->sdmc), NULL);
     qdev_set_parent_bus(DEVICE(&s->sdmc), sysbus_get_default());
-    qdev_prop_set_uint32(DEVICE(&s->sdmc), "silicon-rev",
-                         AST2400_A0_SILICON_REV);
 }
 
 static void ast2400_realize(DeviceState *dev, Error **errp)
@@ -111,6 +109,7 @@ static void ast2400_realize(DeviceState *dev, Error **errp)
     int i;
     AST2400State *s = AST2400(dev);
     Error *err = NULL, *local_err = NULL;
+    uint32_t silicon_rev;
 
     /* IO space */
     memory_region_init_io(&s->iomem, NULL, &ast2400_io_ops, NULL,
@@ -192,7 +191,16 @@ static void ast2400_realize(DeviceState *dev, Error **errp)
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->spi), 1, AST2400_SPI_FLASH_BASE);
 
     /* SDMC - SDRAM Memory Controller */
-    object_property_set_bool(OBJECT(&s->sdmc), true, "realized", &err);
+    silicon_rev = (uint32_t)
+        object_property_get_int(OBJECT(&s->scu), "silicon-rev", &err);
+    if (err) {
+        error_propagate(errp, err);
+        return;
+    }
+
+    object_property_set_int(OBJECT(&s->sdmc), silicon_rev, "silicon-rev", &err);
+    object_property_set_bool(OBJECT(&s->sdmc), true, "realized", &local_err);
+    error_propagate(&err, local_err);
     if (err) {
         error_propagate(errp, err);
         return;
