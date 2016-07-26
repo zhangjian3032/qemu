@@ -22,8 +22,6 @@
 #include "sysemu/blockdev.h"
 
 static struct arm_boot_info aspeed_binfo = {
-    .loader_start = AST2400_SDRAM_BASE,
-    .board_id = 0,
     .nb_cpus = 1,
 };
 
@@ -31,6 +29,21 @@ typedef struct AspeedBoardState {
     AST2400State soc;
     MemoryRegion ram;
 } AspeedBoardState;
+
+typedef struct AspeedBoardConfig {
+    uint32_t hw_strap1;
+    uint32_t silicon_rev;
+    hwaddr sdram_base;
+} AspeedBoardConfig;
+
+enum {
+    PALMETTO_BMC
+};
+
+static const AspeedBoardConfig aspeed_boards[] = {
+    [ PALMETTO_BMC ] = { 0x120CE416, AST2400_A0_SILICON_REV,
+                         AST2400_SDRAM_BASE },
+};
 
 static void aspeed_init_flashes(AspeedSMCState *s, const char *flashtype,
                                 Error **errp)
@@ -58,7 +71,7 @@ static void aspeed_init_flashes(AspeedSMCState *s, const char *flashtype,
     }
 }
 
-static void aspeed_init(MachineState *machine)
+static void aspeed_init(MachineState *machine, int board_model)
 {
     AspeedBoardState *bmc;
 
@@ -68,13 +81,16 @@ static void aspeed_init(MachineState *machine)
                               &error_abort);
 
     memory_region_allocate_system_memory(&bmc->ram, NULL, "ram", ram_size);
-    memory_region_add_subregion(get_system_memory(), AST2400_SDRAM_BASE,
+    memory_region_add_subregion(get_system_memory(),
+                                aspeed_boards[board_model].sdram_base,
                                 &bmc->ram);
     object_property_add_const_link(OBJECT(&bmc->soc), "ram", OBJECT(&bmc->ram),
                                    &error_abort);
-    object_property_set_int(OBJECT(&bmc->soc), 0x120CE416, "hw-strap1",
-                            &error_abort);
-    object_property_set_int(OBJECT(&bmc->soc), AST2400_A0_SILICON_REV,
+    object_property_set_int(OBJECT(&bmc->soc),
+                            aspeed_boards[board_model].hw_strap1,
+                            "hw-strap1", &error_abort);
+    object_property_set_int(OBJECT(&bmc->soc),
+                            aspeed_boards[board_model].silicon_rev,
                             "silicon-rev", &error_abort);
     object_property_set_bool(OBJECT(&bmc->soc), true, "realized",
                              &error_abort);
@@ -86,13 +102,15 @@ static void aspeed_init(MachineState *machine)
     aspeed_binfo.initrd_filename = machine->initrd_filename;
     aspeed_binfo.kernel_cmdline = machine->kernel_cmdline;
     aspeed_binfo.ram_size = ram_size;
+    aspeed_binfo.loader_start = aspeed_boards[board_model].sdram_base,
+    aspeed_binfo.board_id = aspeed_boards[board_model].silicon_rev,
     arm_load_kernel(ARM_CPU(first_cpu), &aspeed_binfo);
 }
 
 static void palmetto_bmc_init(MachineState *machine)
 {
     machine->cpu_model = "arm926";
-    aspeed_init(machine);
+    aspeed_init(machine, PALMETTO_BMC);
 }
 
 static void palmetto_bmc_class_init(ObjectClass *oc, void *data)
