@@ -15,6 +15,7 @@
 #include "qemu-common.h"
 #include "cpu.h"
 #include "exec/address-spaces.h"
+#include "hw/boards.h"
 #include "hw/arm/ast2400.h"
 #include "hw/char/serial.h"
 #include "qemu/log.h"
@@ -65,9 +66,14 @@ static const MemoryRegionOps ast2400_io_ops = {
 
 static void ast2400_init(Object *obj)
 {
+    const char *cpu_model = current_machine->cpu_model;
     AST2400State *s = AST2400(obj);
 
-    s->cpu = cpu_arm_init("arm926");
+    if (!cpu_model) {
+        cpu_model = "arm926";
+    }
+
+    s->cpu = cpu_arm_init(cpu_model);
 
     object_initialize(&s->vic, sizeof(s->vic), TYPE_ASPEED_VIC);
     object_property_add_child(obj, "vic", OBJECT(&s->vic), NULL);

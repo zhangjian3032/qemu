@@ -91,6 +91,7 @@ static void aspeed_init(MachineState *machine)
 
 static void palmetto_bmc_init(MachineState *machine)
 {
+    machine->cpu_model = "arm926";
     aspeed_init(machine);
 }
 
