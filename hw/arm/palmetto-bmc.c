@@ -45,7 +45,7 @@ enum {
 };
 
 static const AspeedBoardConfig aspeed_boards[] = {
-    [ PALMETTO_BMC ] = { 0x120CE416, AST2400_A0_SILICON_REV,
+    [ PALMETTO_BMC ] = { AST2400_HW_STRAP1, AST2400_A0_SILICON_REV,
                          AST2400_SDRAM_BASE },
     [ AST2500_EDK ]  = { 0x00000200, AST2500_A1_SILICON_REV,
                          AST2500_SDRAM_BASE },
