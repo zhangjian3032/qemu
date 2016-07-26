@@ -31,6 +31,8 @@ typedef struct AspeedBoardState {
     MemoryRegion ram;
 } AspeedBoardState;
 
+static bool aspeed_has_flash0;
+
 typedef struct AspeedBoardConfig {
     uint32_t hw_strap1;
     uint32_t silicon_rev;
@@ -67,6 +69,7 @@ static void aspeed_init_flashes(AspeedSMCState *s, const char *flashtype,
         if (dinfo) {
             qdev_prop_set_drive(fl->flash, "drive", blk_by_legacy_dinfo(dinfo),
                                 errp);
+            aspeed_has_flash0 = true;
         }
         m25p80_set_rom_storage(fl->flash, &fl->mmio);
         qdev_init_nofail(fl->flash);
@@ -102,6 +105,19 @@ static void aspeed_init(MachineState *machine, int board_model)
 
     aspeed_init_flashes(&bmc->soc.smc, "n25q256a", &error_abort);
     aspeed_init_flashes(&bmc->soc.spi, "mx25l25635f", &error_abort);
+
+    /*
+     * Install first SMC/FMC flash content as a rom.
+     */
+    if (aspeed_has_flash0) {
+        AspeedSMCFlash *flash0 = &bmc->soc.smc.flashes[0];
+        MemoryRegion *flash0alias = g_new(MemoryRegion, 1);
+
+        memory_region_init_alias(flash0alias, OBJECT(&bmc->soc.smc),
+                                 "flash0alias", &flash0->mmio, 0,
+                                 flash0->size);
+        memory_region_add_subregion(get_system_memory(), 0, flash0alias);
+    }
 
     aspeed_binfo.kernel_filename = machine->kernel_filename;
     aspeed_binfo.initrd_filename = machine->initrd_filename;
