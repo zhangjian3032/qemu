@@ -99,7 +99,7 @@ static void aspeed_init(MachineState *machine, int board_model)
                              &error_abort);
 
     aspeed_init_flashes(&bmc->soc.smc, "n25q256a", &error_abort);
-    aspeed_init_flashes(&bmc->soc.spi, "mx25l25635e", &error_abort);
+    aspeed_init_flashes(&bmc->soc.spi, "mx25l25635f", &error_abort);
 
     aspeed_binfo.kernel_filename = machine->kernel_filename;
     aspeed_binfo.initrd_filename = machine->initrd_filename;
