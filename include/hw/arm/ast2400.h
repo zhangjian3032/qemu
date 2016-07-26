@@ -41,4 +41,9 @@ typedef struct AST2400State {
 
 #define AST2400_SDRAM_BASE       0x40000000
 
+/*
+ * for Aspeed AST2500 SOC and higher
+ */
+#define AST2500_SDRAM_BASE       0x80000000
+
 #endif /* AST2400_H */

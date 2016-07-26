@@ -37,12 +37,15 @@ typedef struct AspeedBoardConfig {
 } AspeedBoardConfig;
 
 enum {
-    PALMETTO_BMC
+    PALMETTO_BMC,
+    AST2500_EDK
 };
 
 static const AspeedBoardConfig aspeed_boards[] = {
     [ PALMETTO_BMC ] = { 0x120CE416, AST2400_A0_SILICON_REV,
                          AST2400_SDRAM_BASE },
+    [ AST2500_EDK ]  = { 0x00000200, AST2500_A1_SILICON_REV,
+                         AST2500_SDRAM_BASE },
 };
 
 static void aspeed_init_flashes(AspeedSMCState *s, const char *flashtype,
@@ -133,9 +136,36 @@ static const TypeInfo palmetto_bmc_type = {
     .class_init = palmetto_bmc_class_init,
 };
 
+static void ast2500_edk_init(MachineState *machine)
+{
+    machine->cpu_model = "arm1176";
+    aspeed_init(machine, AST2500_EDK);
+}
+
+static void ast2500_edk_class_init(ObjectClass *oc, void *data)
+{
+    MachineClass *mc = MACHINE_CLASS(oc);
+
+    mc->desc = "Aspeed AST2500 EDK (ARM1176)";
+    mc->init = ast2500_edk_init;
+    mc->max_cpus = 1;
+    mc->no_sdcard = 1;
+    mc->no_floppy = 1;
+    mc->no_cdrom = 1;
+    mc->no_sdcard = 1;
+    mc->no_parallel = 1;
+}
+
+static const TypeInfo ast2500_edk_type = {
+    .name = MACHINE_TYPE_NAME("ast2500-edk"),
+    .parent = TYPE_MACHINE,
+    .class_init = ast2500_edk_class_init,
+};
+
 static void aspeed_machine_init(void)
 {
     type_register_static(&palmetto_bmc_type);
+    type_register_static(&ast2500_edk_type);
 }
 
 type_init(aspeed_machine_init)
