@@ -29,6 +29,7 @@
 #define ASPEED_SOC_VIC_BASE         0x1E6C0000
 #define ASPEED_SOC_SDMC_BASE        0x1E6E0000
 #define ASPEED_SOC_SCU_BASE         0x1E6E2000
+#define ASPEED_SOC_SRAM_BASE        0x1E720000
 #define ASPEED_SOC_TIMER_BASE       0x1E782000
 #define ASPEED_SOC_I2C_BASE         0x1E78A000
 
@@ -48,13 +49,13 @@ static const char *aspeed_soc_ast2500_typenames[] = {
 
 static const AspeedSoCInfo aspeed_socs[] = {
     { "ast2400-a0", "arm926", AST2400_A0_SILICON_REV, AST2400_SDRAM_BASE,
-      1, aspeed_soc_ast2400_spi_bases,
+      0x8000, 1, aspeed_soc_ast2400_spi_bases,
       "aspeed.smc.fmc", aspeed_soc_ast2400_typenames },
     { "ast2400",    "arm926", AST2400_A0_SILICON_REV, AST2400_SDRAM_BASE,
-      1, aspeed_soc_ast2400_spi_bases,
-     "aspeed.smc.fmc", aspeed_soc_ast2400_typenames },
+      0x8000, 1, aspeed_soc_ast2400_spi_bases,
+      "aspeed.smc.fmc", aspeed_soc_ast2400_typenames },
     { "ast2500-a1", "arm1176", AST2500_A1_SILICON_REV, AST2500_SDRAM_BASE,
-      2, aspeed_soc_ast2500_spi_bases,
+      0x9000, 2, aspeed_soc_ast2500_spi_bases,
       "aspeed.smc.ast2500-fmc", aspeed_soc_ast2500_typenames },
 };
 
@@ -145,6 +146,17 @@ static void aspeed_soc_realize(DeviceState *dev, Error **errp)
             "aspeed_soc.io", ASPEED_SOC_IOMEM_SIZE);
     memory_region_add_subregion_overlap(get_system_memory(),
                                         ASPEED_SOC_IOMEM_BASE, &s->iomem, -1);
+
+     /* IO space */
+    memory_region_init_ram(&s->sram, NULL, "aspeed.sram", sc->info->sram_size,
+                           &err);
+    if (err) {
+        error_propagate(errp, err);
+        return;
+    }
+    vmstate_register_ram_global(&s->sram);
+    memory_region_add_subregion(get_system_memory(), ASPEED_SOC_SRAM_BASE,
+                                &s->sram);
 
     /* VIC */
     object_property_set_bool(OBJECT(&s->vic), true, "realized", &err);
