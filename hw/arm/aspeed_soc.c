@@ -209,6 +209,13 @@ static void aspeed_soc_realize(DeviceState *dev, Error **errp)
 
     /* FMC */
     object_property_set_int(OBJECT(&s->fmc), 1, "num-cs", &err);
+    object_property_set_int(OBJECT(&s->fmc), sc->info->sdram_base, "sdram-base",
+                            &local_err);
+    error_propagate(&err, local_err);
+    if (err) {
+        error_propagate(errp, err);
+        return;
+    }
     object_property_set_bool(OBJECT(&s->fmc), true, "realized", &local_err);
     error_propagate(&err, local_err);
     if (err) {
