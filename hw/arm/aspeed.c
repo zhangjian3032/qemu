@@ -20,6 +20,7 @@
 #include "qemu/log.h"
 #include "sysemu/block-backend.h"
 #include "sysemu/blockdev.h"
+#include "hw/loader.h"
 
 static struct arm_boot_info aspeed_board_binfo = {
     .board_id = -1, /* device-tree-only board */
@@ -109,6 +110,7 @@ static void aspeed_board_init(MachineState *machine,
 {
     AspeedBoardState *bmc;
     AspeedSoCClass *sc;
+    DriveInfo *drive0 = drive_get(IF_MTD, 0, 0);
 
     bmc = g_new0(AspeedBoardState, 1);
     object_initialize(&bmc->soc, (sizeof(bmc->soc)), cfg->soc_name);
@@ -140,6 +142,18 @@ static void aspeed_board_init(MachineState *machine,
     aspeed_board_init_flashes(&bmc->soc.fmc, "n25q256a", &error_abort);
     aspeed_board_init_flashes(&bmc->soc.spi[0], cfg->host_flashmodel,
                               &error_abort);
+
+    /*
+     * Install first SMC/FMC flash content as a rom.
+     */
+    if (drive0) {
+        AspeedSMCFlash *flash0 = &bmc->soc.fmc.flashes[0];
+        MemoryRegion *flash0alias = g_new(MemoryRegion, 1);
+
+        memory_region_init_alias(flash0alias, NULL, "aspeed.flash0",
+                                 &flash0->mmio, 0, flash0->size);
+        memory_region_add_subregion(get_system_memory(), 0, flash0alias);
+    }
 
     aspeed_board_binfo.kernel_filename = machine->kernel_filename;
     aspeed_board_binfo.initrd_filename = machine->initrd_filename;
