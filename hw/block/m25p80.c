@@ -29,6 +29,7 @@
 #include "qemu/bitops.h"
 #include "qemu/log.h"
 #include "qapi/error.h"
+#include "hw/block/flash.h"
 
 #ifndef M25P80_ERR_DEBUG
 #define M25P80_ERR_DEBUG 0
@@ -1260,3 +1261,11 @@ static void m25p80_register_types(void)
 }
 
 type_init(m25p80_register_types)
+
+uint8_t *m25p80_get_storage(DeviceState *dev, uint32_t *size)
+{
+    Flash *s = M25P80(dev);
+
+    *size = s->size;
+    return s->storage;
+}

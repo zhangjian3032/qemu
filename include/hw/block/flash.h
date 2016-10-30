@@ -64,4 +64,6 @@ uint8_t ecc_digest(ECCState *s, uint8_t sample);
 void ecc_reset(ECCState *s);
 extern VMStateDescription vmstate_ecc_state;
 
+extern uint8_t *m25p80_get_storage(DeviceState *dev, uint32_t *size);
+
 #endif

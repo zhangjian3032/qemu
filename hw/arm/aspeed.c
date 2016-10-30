@@ -21,6 +21,7 @@
 #include "sysemu/block-backend.h"
 #include "sysemu/blockdev.h"
 #include "hw/loader.h"
+#include "hw/block/flash.h"
 
 static struct arm_boot_info aspeed_board_binfo = {
     .board_id = -1, /* device-tree-only board */
@@ -149,6 +150,12 @@ static void aspeed_board_init(MachineState *machine,
     if (drive0) {
         AspeedSMCFlash *flash0 = &bmc->soc.fmc.flashes[0];
         MemoryRegion *flash0alias = g_new(MemoryRegion, 1);
+        uint32_t size;
+        uint8_t *storage;
+
+        storage = m25p80_get_storage(DEVICE(flash0->flash), &size);
+
+        rom_add_blob_fixed("aspeed.flash.0", storage, size, 0);
 
         memory_region_init_alias(flash0alias, NULL, "aspeed.flash0",
                                  &flash0->mmio, 0, flash0->size);
