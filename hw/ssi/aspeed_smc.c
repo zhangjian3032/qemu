@@ -132,6 +132,13 @@
 #define ASPEED_SOC_SPI_FLASH_BASE   0x30000000
 #define ASPEED_SOC_SPI2_FLASH_BASE  0x38000000
 
+/* Flash opcodes. */
+#define SPI_OP_READ       0x03    /* Read data bytes (low frequency) */
+
+/* Used for Macronix and Winbond flashes. */
+#define SPI_OP_EN4B       0xb7    /* Enter 4-byte mode */
+#define SPI_OP_EX4B       0xe9    /* Exit 4-byte mode */
+
 /*
  * Default segments mapping addresses and size for each slave per
  * controller. These can be changed when board is initialized with the
@@ -338,15 +345,69 @@ static inline bool aspeed_smc_is_usermode(const AspeedSMCState *s, int cs)
     return aspeed_smc_flash_mode(s, cs) == CTRL_USERMODE;
 }
 
+static inline int aspeed_smc_flash_cmd(const AspeedSMCState *s, int cs)
+{
+    /* There is a default value for this mode */
+    if (aspeed_smc_flash_mode(s, cs) == CTRL_READMODE) {
+        return SPI_OP_READ;
+    } else {
+        return (s->regs[s->r_ctrl0 + cs] >> CTRL_CMD_SHIFT) & CTRL_CMD_MASK;
+    }
+}
+
+static inline int aspeed_smc_flash_is_4byte(const AspeedSMCState *s, int cs)
+{
+    return s->regs[s->r_ce_ctrl] & (1 << (CTRL_EXTENDED0 + cs));
+}
+
+static bool aspeed_smc_is_ce_stop_active(const AspeedSMCState *s, int cs)
+{
+    return s->regs[s->r_ctrl0 + cs] & CTRL_CE_STOP_ACTIVE;
+}
+
+static void aspeed_smc_flash_select(AspeedSMCState *s, int cs)
+{
+    s->regs[s->r_ctrl0 + cs] &= ~CTRL_CE_STOP_ACTIVE;
+    qemu_set_irq(s->cs_lines[cs], aspeed_smc_is_ce_stop_active(s, cs));
+}
+
+static void aspeed_smc_flash_unselect(AspeedSMCState *s, int cs)
+{
+    s->regs[s->r_ctrl0 + cs] |= CTRL_CE_STOP_ACTIVE;
+    qemu_set_irq(s->cs_lines[cs], aspeed_smc_is_ce_stop_active(s, cs));
+}
+
 static inline bool aspeed_smc_is_writable(const AspeedSMCState *s, int cs)
 {
     return s->regs[s->r_conf] & (1 << (s->conf_enable_w0 + cs));
 }
 
+static void aspeed_smc_flash_setup_read(AspeedSMCFlash *fl, uint32_t addr)
+{
+    AspeedSMCState *s = fl->controller;
+    uint8_t cmd = aspeed_smc_flash_cmd(s, fl->id);
+
+    /*
+     * We should not have to send 4BYTE each time
+     */
+    if (aspeed_smc_flash_is_4byte(s, fl->id)) {
+        ssi_transfer(s->spi, SPI_OP_EN4B);
+    }
+
+    ssi_transfer(s->spi, cmd);
+
+    if (aspeed_smc_flash_is_4byte(s, fl->id)) {
+        ssi_transfer(s->spi, (addr >> 24) & 0xff);
+    }
+    ssi_transfer(s->spi, (addr >> 16) & 0xff);
+    ssi_transfer(s->spi, (addr >> 8) & 0xff);
+    ssi_transfer(s->spi, (addr & 0xff));
+}
+
 static uint64_t aspeed_smc_flash_read(void *opaque, hwaddr addr, unsigned size)
 {
     AspeedSMCFlash *fl = opaque;
-    const AspeedSMCState *s = fl->controller;
+    AspeedSMCState *s = fl->controller;
     uint64_t ret = 0;
     int i;
 
@@ -355,19 +416,51 @@ static uint64_t aspeed_smc_flash_read(void *opaque, hwaddr addr, unsigned size)
             ret |= ssi_transfer(s->spi, 0x0) << (8 * i);
         }
     } else {
-        qemu_log_mask(LOG_UNIMP, "%s: usermode not implemented\n",
-                      __func__);
-        ret = -1;
+        aspeed_smc_flash_select(s, fl->id);
+        aspeed_smc_flash_setup_read(fl, addr);
+
+        for (i = 0; i < size; i++) {
+            ret |= ssi_transfer(s->spi, 0x0) << (8 * i);
+        }
+
+        aspeed_smc_flash_unselect(s, fl->id);
+    }
+    return ret;
+}
+
+static void aspeed_smc_flash_setup_write(AspeedSMCFlash *fl, uint32_t addr)
+{
+    AspeedSMCState *s = fl->controller;
+    uint8_t cmd = aspeed_smc_flash_cmd(s, fl->id);
+
+    if (!cmd) {
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: no write cmd for 0x%08x\n",
+                      __func__, addr);
+        return;
     }
 
-    return ret;
+    /*
+     * We should not have to send 4BYTE each time
+     */
+    if (aspeed_smc_flash_is_4byte(s, fl->id)) {
+        ssi_transfer(s->spi, SPI_OP_EN4B);
+    }
+
+    ssi_transfer(s->spi, cmd);
+
+    if (aspeed_smc_flash_is_4byte(s, fl->id)) {
+        ssi_transfer(s->spi, (addr >> 24) & 0xff);
+    }
+    ssi_transfer(s->spi, (addr >> 16) & 0xff);
+    ssi_transfer(s->spi, (addr >> 8) & 0xff);
+    ssi_transfer(s->spi, (addr & 0xff));
 }
 
 static void aspeed_smc_flash_write(void *opaque, hwaddr addr, uint64_t data,
                            unsigned size)
 {
     AspeedSMCFlash *fl = opaque;
-    const AspeedSMCState *s = fl->controller;
+    AspeedSMCState *s = fl->controller;
     int i;
 
     if (!aspeed_smc_is_writable(s, fl->id)) {
@@ -376,14 +469,19 @@ static void aspeed_smc_flash_write(void *opaque, hwaddr addr, uint64_t data,
         return;
     }
 
-    if (!aspeed_smc_is_usermode(s, fl->id)) {
-        qemu_log_mask(LOG_UNIMP, "%s: usermode not implemented\n",
-                      __func__);
-        return;
-    }
+    if (aspeed_smc_is_usermode(s, fl->id)) {
+        for (i = 0; i < size; i++) {
+            ssi_transfer(s->spi, (data >> (8 * i)) & 0xff);
+        }
+    } else {
+        aspeed_smc_flash_select(s, fl->id);
+        aspeed_smc_flash_setup_write(fl, addr);
 
-    for (i = 0; i < size; i++) {
-        ssi_transfer(s->spi, (data >> (8 * i)) & 0xff);
+        for (i = 0; i < size; i++) {
+            ssi_transfer(s->spi, (data >> (8 * i)) & 0xff);
+        }
+
+        aspeed_smc_flash_unselect(s, fl->id);
     }
 }
 
@@ -396,11 +494,6 @@ static const MemoryRegionOps aspeed_smc_flash_ops = {
         .max_access_size = 4,
     },
 };
-
-static bool aspeed_smc_is_ce_stop_active(const AspeedSMCState *s, int cs)
-{
-    return s->regs[s->r_ctrl0 + cs] & CTRL_CE_STOP_ACTIVE;
-}
 
 static void aspeed_smc_update_cs(const AspeedSMCState *s)
 {
