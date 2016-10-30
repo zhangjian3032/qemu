@@ -34,13 +34,16 @@ typedef struct AspeedBoardState {
 typedef struct AspeedBoardConfig {
     const char *soc_name;
     uint32_t hw_strap1;
+    const char *host_flashmodel;
 } AspeedBoardConfig;
 
 enum {
     PALMETTO_BMC,
     AST2500_EVB,
+    WITHERSPOON_BMC,
 };
 
+/* 0x120CE416 */
 #define PALMETTO_BMC_HW_STRAP1 (                                        \
         SCU_AST2400_HW_STRAP_DRAM_SIZE(DRAM_SIZE_256MB) |               \
         SCU_AST2400_HW_STRAP_DRAM_CONFIG(2 /* DDR3 with CL=6, CWL=5 */) | \
@@ -54,6 +57,7 @@ enum {
         SCU_HW_STRAP_VGA_SIZE_SET(VGA_16M_DRAM) |                       \
         SCU_AST2400_HW_STRAP_BOOT_MODE(AST2400_SPI_BOOT))
 
+/* 0xF100C2E6 */
 #define AST2500_EVB_HW_STRAP1 ((                                        \
         AST2500_HW_STRAP1_DEFAULTS |                                    \
         SCU_AST2500_HW_STRAP_SPI_AUTOFETCH_ENABLE |                     \
@@ -64,9 +68,14 @@ enum {
         SCU_HW_STRAP_MAC0_RGMII) &                                      \
         ~SCU_HW_STRAP_2ND_BOOT_WDT)
 
+/* TODO : 0xF10AE216 */
+#define WITHERSPOON_BMC_HW_STRAP1 0xF10AE216
+
 static const AspeedBoardConfig aspeed_boards[] = {
-    [PALMETTO_BMC] = { "ast2400-a0", PALMETTO_BMC_HW_STRAP1 },
-    [AST2500_EVB]  = { "ast2500-a1", AST2500_EVB_HW_STRAP1 },
+    [PALMETTO_BMC] = { "ast2400-a0", PALMETTO_BMC_HW_STRAP1, "mx25l25635e" },
+    [AST2500_EVB]  = { "ast2500-a1", AST2500_EVB_HW_STRAP1, "mx25l25635e"},
+    [WITHERSPOON_BMC] = { "ast2500-a1", WITHERSPOON_BMC_HW_STRAP1,
+                          "mx66l1g45g" },
 };
 
 static void aspeed_board_init_flashes(AspeedSMCState *s, const char *flashtype,
@@ -129,7 +138,8 @@ static void aspeed_board_init(MachineState *machine,
                                    &error_abort);
 
     aspeed_board_init_flashes(&bmc->soc.fmc, "n25q256a", &error_abort);
-    aspeed_board_init_flashes(&bmc->soc.spi[0], "mx25l25635e", &error_abort);
+    aspeed_board_init_flashes(&bmc->soc.spi[0], cfg->host_flashmodel,
+                              &error_abort);
 
     aspeed_board_binfo.kernel_filename = machine->kernel_filename;
     aspeed_board_binfo.initrd_filename = machine->initrd_filename;
@@ -188,10 +198,35 @@ static const TypeInfo ast2500_evb_type = {
     .class_init = ast2500_evb_class_init,
 };
 
+static void witherspoon_bmc_init(MachineState *machine)
+{
+    aspeed_board_init(machine, &aspeed_boards[WITHERSPOON_BMC]);
+}
+
+static void witherspoon_bmc_class_init(ObjectClass *oc, void *data)
+{
+    MachineClass *mc = MACHINE_CLASS(oc);
+
+    mc->desc = "OpenPOWER Witherspoon BMC (ARM1176)";
+    mc->init = witherspoon_bmc_init;
+    mc->max_cpus = 1;
+    mc->no_sdcard = 1;
+    mc->no_floppy = 1;
+    mc->no_cdrom = 1;
+    mc->no_parallel = 1;
+}
+
+static const TypeInfo witherspoon_bmc_type = {
+    .name = MACHINE_TYPE_NAME("witherspoon-bmc"),
+    .parent = TYPE_MACHINE,
+    .class_init = witherspoon_bmc_class_init,
+};
+
 static void aspeed_machine_init(void)
 {
     type_register_static(&palmetto_bmc_type);
     type_register_static(&ast2500_evb_type);
+    type_register_static(&witherspoon_bmc_type);
 }
 
 type_init(aspeed_machine_init)
