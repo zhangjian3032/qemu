@@ -1251,12 +1251,6 @@ static const ARMCPRegInfo v7_cp_reginfo[] = {
       .access = PL1_RW, .accessfn = access_tpm, .type = ARM_CP_ALIAS,
       .fieldoffset = offsetof(CPUARMState, cp15.c9_pminten),
       .writefn = pmintenclr_write },
-    { .name = "VBAR", .state = ARM_CP_STATE_BOTH,
-      .opc0 = 3, .crn = 12, .crm = 0, .opc1 = 0, .opc2 = 0,
-      .access = PL1_RW, .writefn = vbar_write,
-      .bank_fieldoffsets = { offsetof(CPUARMState, cp15.vbar_s),
-                             offsetof(CPUARMState, cp15.vbar_ns) },
-      .resetvalue = 0 },
     { .name = "CCSIDR", .state = ARM_CP_STATE_BOTH,
       .opc0 = 3, .crn = 0, .crm = 0, .opc1 = 1, .opc2 = 0,
       .access = PL1_R, .readfn = ccsidr_read, .type = ARM_CP_NO_RAW },
@@ -1407,6 +1401,15 @@ static const ARMCPRegInfo v6k_cp_reginfo[] = {
       .access = PL1_RW,
       .bank_fieldoffsets = { offsetoflow32(CPUARMState, cp15.tpidrprw_s),
                              offsetoflow32(CPUARMState, cp15.tpidrprw_ns) },
+      .resetvalue = 0 },
+    REGINFO_SENTINEL
+};
+static const ARMCPRegInfo vbar_cp_reginfo[] = {
+    { .name = "VBAR", .state = ARM_CP_STATE_BOTH,
+      .opc0 = 3, .crn = 12, .crm = 0, .opc1 = 0, .opc2 = 0,
+      .access = PL1_RW, .writefn = vbar_write,
+      .bank_fieldoffsets = { offsetof(CPUARMState, cp15.vbar_s),
+                             offsetof(CPUARMState, cp15.vbar_ns) },
       .resetvalue = 0 },
     REGINFO_SENTINEL
 };
@@ -4485,6 +4488,9 @@ void register_cp_regs_for_features(ARMCPU *cpu)
     }
     if (arm_feature(env, ARM_FEATURE_V6K)) {
         define_arm_cp_regs(cpu, v6k_cp_reginfo);
+    }
+    if (arm_feature(env, ARM_FEATURE_VBAR)) {
+        define_arm_cp_regs(cpu, vbar_cp_reginfo);
     }
     if (arm_feature(env, ARM_FEATURE_V7MP) &&
         !arm_feature(env, ARM_FEATURE_MPU)) {
