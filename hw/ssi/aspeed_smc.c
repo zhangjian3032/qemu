@@ -23,6 +23,7 @@
  */
 
 #include "qemu/osdep.h"
+#include "qapi/error.h"
 #include "hw/sysbus.h"
 #include "sysemu/sysemu.h"
 #include "qemu/log.h"
@@ -592,6 +593,14 @@ static void aspeed_smc_reset(DeviceState *d)
     }
 
     aspeed_smc_update_cs(s);
+
+    /*
+     * ROM mode is the default so that we can boot from it when this
+     * is supported
+     */
+    for (i = 0; i < s->ctrl->max_slaves; ++i) {
+        memory_region_rom_device_set_romd(&s->flashes[i].mmio, true);
+    }
 }
 
 static uint64_t aspeed_smc_read(void *opaque, hwaddr addr, unsigned int size)
@@ -844,7 +853,12 @@ static void aspeed_smc_write(void *opaque, hwaddr addr, uint64_t data,
         addr == s->r_ce_ctrl) {
         s->regs[addr] = value;
     } else if (addr >= s->r_ctrl0 && addr < s->r_ctrl0 + s->num_cs) {
+        int cs = addr - s->r_ctrl0;
+
         s->regs[addr] = value;
+
+        memory_region_rom_device_set_romd(&s->flashes[cs].mmio,
+                                          !aspeed_smc_is_usermode(s, cs));
         aspeed_smc_update_cs(s);
     } else if (addr >= R_SEG_ADDR0 &&
                addr < R_SEG_ADDR0 + s->ctrl->max_slaves) {
@@ -885,6 +899,7 @@ static void aspeed_smc_realize(DeviceState *dev, Error **errp)
     int i;
     char name[32];
     hwaddr offset = 0;
+    Error *err = NULL;
 
     s->ctrl = mc->ctrl;
 
@@ -914,8 +929,6 @@ static void aspeed_smc_realize(DeviceState *dev, Error **errp)
     for (i = 0; i < s->num_cs; ++i) {
         sysbus_init_irq(sbd, &s->cs_lines[i]);
     }
-
-    aspeed_smc_reset(dev);
 
     /* The memory region for the controller registers */
     memory_region_init_io(&s->mmio, OBJECT(s), &aspeed_smc_ops, s,
@@ -951,11 +964,23 @@ static void aspeed_smc_realize(DeviceState *dev, Error **errp)
         fl->id = i;
         fl->controller = s;
         fl->size = s->ctrl->segments[i].size;
-        memory_region_init_io(&fl->mmio, OBJECT(s), &aspeed_smc_flash_ops,
-                              fl, name, fl->size);
+        memory_region_init_rom_device(&fl->mmio, OBJECT(s),
+                                      &aspeed_smc_flash_ops,
+                                      fl, name, fl->size, &err);
+        if (err) {
+            error_propagate(errp, err);
+            return;
+        }
+
         memory_region_add_subregion(&s->mmio_flash, offset, &fl->mmio);
         offset += fl->size;
     }
+
+    /*
+     * Reset sets the ROM mode of the flash mmios so we need to do
+     * that after the flashes are created.
+     */
+    aspeed_smc_reset(dev);
 }
 
 static const VMStateDescription vmstate_aspeed_smc = {
