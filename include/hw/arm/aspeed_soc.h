@@ -19,6 +19,7 @@
 #include "hw/timer/aspeed_timer.h"
 #include "hw/i2c/aspeed_i2c.h"
 #include "hw/ssi/aspeed_smc.h"
+#include "hw/net/ftgmac100.h"
 
 #define ASPEED_SPIS_NUM  2
 
@@ -37,6 +38,7 @@ typedef struct AspeedSoCState {
     AspeedSMCState fmc;
     AspeedSMCState spi[ASPEED_SPIS_NUM];
     AspeedSDMCState sdmc;
+    Ftgmac100State ftgmac100;
 } AspeedSoCState;
 
 #define TYPE_ASPEED_SOC "aspeed-soc"
