@@ -61,11 +61,14 @@ static uint64_t aspeed_wdt_read(void *opaque, hwaddr offset, unsigned size)
 
 }
 
+#define PCLK_HZ 24000000
+
 static void aspeed_wdt_write(void *opaque, hwaddr offset, uint64_t data,
 				 unsigned size)
 {
     AspeedWDTState *s = ASPEED_WDT(opaque);
     bool en = data & BIT(0);
+    bool pclk = !(data & BIT(4));
 
     switch (offset) {
     case WDT_STATUS:
@@ -78,21 +81,36 @@ static void aspeed_wdt_write(void *opaque, hwaddr offset, uint64_t data,
         break;
     case WDT_RESTART:
         if ((data & 0xFFFF) == 0x4755) {
+            uint32_t reload;
+
             s->reg_status = s->reg_reload_value;
+
+            if (pclk) {
+                reload = muldiv64(s->reg_reload_value, NANOSECONDS_PER_SECOND,
+                        PCLK_HZ) ;
+            } else {
+                reload = s->reg_reload_value * 1000;
+            }
 
             if (s->enabled) {
                 timer_mod(s->timer,
-                          qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) +
-                          s->reg_reload_value * NANOSECONDS_PER_SECOND);
+                          qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + reload);
             }
         }
         break;
     case WDT_CTRL:
         if (en && !s->enabled) {
+            uint32_t reload;
+
+            if (pclk) {
+                reload = muldiv64(s->reg_reload_value, NANOSECONDS_PER_SECOND,
+                        PCLK_HZ) ;
+            } else {
+                reload = s->reg_reload_value * 1000;
+            }
+
             s->enabled = true;
-            timer_mod(s->timer,
-                      qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) +
-                      s->reg_reload_value * NANOSECONDS_PER_SECOND);
+            timer_mod(s->timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + reload);
         }
         else if (!en && s->enabled) {
             s->enabled = false;
