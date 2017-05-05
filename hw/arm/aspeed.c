@@ -95,6 +95,11 @@ static const AspeedI2CDevice ast2500_i2c_devices[] = {
     { NULL, 0x0, 0x0 }
 };
 
+static const AspeedI2CDevice romulus_i2c_devices[] = {
+    { "pca9552", 0x60, 11 },
+    { NULL, 0x0, 0x0 }
+};
+
 static const AspeedBoardConfig aspeed_boards[] = {
     [PALMETTO_BMC] = {
         .soc_name  = "ast2400-a1",
@@ -117,6 +122,7 @@ static const AspeedBoardConfig aspeed_boards[] = {
         .fmc_model = "n25q256a",
         .spi_model = "mx66l1g45g",
         .num_cs    = 2,
+        .i2c_devices = romulus_i2c_devices,
     },
 };
 
