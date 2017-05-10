@@ -96,6 +96,7 @@ static const AspeedI2CDevice ast2500_i2c_devices[] = {
 };
 
 static const AspeedI2CDevice romulus_i2c_devices[] = {
+    { "rx8900", 0x32, 11 },
     { "pca9552", 0x60, 11 },
     { NULL, 0x0, 0x0 }
 };
