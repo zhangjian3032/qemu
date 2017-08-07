@@ -85,6 +85,7 @@ enum {
 
 static void palmetto_bmc_i2c_init(AspeedBoardState *bmc);
 static void ast2500_evb_i2c_init(AspeedBoardState *bmc);
+static void romulus_bmc_i2c_init(AspeedBoardState *bmc);
 
 static const AspeedBoardConfig aspeed_boards[] = {
     [PALMETTO_BMC] = {
@@ -109,6 +110,7 @@ static const AspeedBoardConfig aspeed_boards[] = {
         .fmc_model = "n25q256a",
         .spi_model = "mx66l1g45g",
         .num_cs    = 2,
+        .i2c_init  = romulus_bmc_i2c_init,
     },
 };
 
@@ -284,6 +286,8 @@ static void ast2500_evb_i2c_init(AspeedBoardState *bmc)
 
     /* The AST2500 EVB expects a LM75 but a TMP105 is compatible */
     i2c_create_slave(aspeed_i2c_get_bus(DEVICE(&soc->i2c), 7), "tmp105", 0x4d);
+
+    i2c_create_slave(aspeed_i2c_get_bus(DEVICE(&soc->i2c), 11), "rx8900", 0x32);
 }
 
 static void ast2500_evb_init(MachineState *machine)
@@ -309,6 +313,13 @@ static const TypeInfo ast2500_evb_type = {
     .parent = TYPE_MACHINE,
     .class_init = ast2500_evb_class_init,
 };
+
+static void romulus_bmc_i2c_init(AspeedBoardState *bmc)
+{
+    AspeedSoCState *soc = &bmc->soc;
+
+    i2c_create_slave(aspeed_i2c_get_bus(DEVICE(&soc->i2c), 11), "rx8900", 0x32);
+}
 
 static void romulus_bmc_init(MachineState *machine)
 {
