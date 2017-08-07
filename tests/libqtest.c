@@ -28,6 +28,7 @@
 
 #define MAX_IRQ 256
 #define SOCKET_TIMEOUT 50
+#define IRQ_KEY_LENGTH 64
 
 QTestState *global_qtest;
 
@@ -35,11 +36,21 @@ struct QTestState
 {
     int fd;
     int qmp_fd;
+    GHashTable *irq_handlers;
     bool irq_level[MAX_IRQ];
     GString *rx;
     pid_t qemu_pid;  /* our child QEMU process */
     bool big_endian;
 };
+
+typedef struct irq_action {
+    void (*cb)(void *opaque, const char *name, int irq, bool level);
+    void *opaque;
+    const char *name;
+    int n;
+    bool level;
+} irq_action;
+
 
 static GHookList abrt_hooks;
 static GList *qtest_instances;
@@ -224,6 +235,9 @@ QTestState *qtest_init_without_qmp_handshake(const char *extra_args)
 
     s->big_endian = qtest_query_target_endianness(s);
 
+    s->irq_handlers = g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
+            g_free);
+
     return s;
 }
 
@@ -242,6 +256,8 @@ void qtest_quit(QTestState *s)
 {
     qtest_instances = g_list_remove(qtest_instances, s);
     g_hook_destroy_link(&abrt_hooks, g_hook_find_data(&abrt_hooks, TRUE, s));
+
+    g_hash_table_destroy(s->irq_handlers);
 
     /* Uninstall SIGABRT handler on last instance */
     if (!qtest_instances) {
@@ -323,11 +339,35 @@ static GString *qtest_recv_line(QTestState *s)
     return line;
 }
 
+void qtest_irq_attach(QTestState *s, const char *name, int irq,
+        void (*irq_cb)(void *opaque, const char *name, int irq, bool level),
+        void *opaque)
+{
+    char key[IRQ_KEY_LENGTH];
+    irq_action *action = g_new0(irq_action, 1);
+
+    action->cb = irq_cb;
+    action->name = name;
+    action->n = irq;
+    action->opaque = opaque;
+    action->level = false;
+
+    g_assert_cmpint(snprintf(key, sizeof(key), "%s.%d",
+            name, irq), <, sizeof(key));
+
+    g_hash_table_insert(s->irq_handlers, g_strdup(key), action);
+}
+
+#define MAX_ACTIONS 256
 static gchar **qtest_rsp(QTestState *s, int expected_args)
 {
     GString *line;
     gchar **words;
     int i;
+    int action_index;
+    int action_count = 0;
+    bool action_raise[MAX_ACTIONS];
+    irq_action *actions[MAX_ACTIONS];
 
 redo:
     line = qtest_recv_line(s);
@@ -344,10 +384,29 @@ redo:
         g_assert_cmpint(irq, >=, 0);
         g_assert_cmpint(irq, <, MAX_IRQ);
 
-        if (strcmp(words[1], "raise") == 0) {
-            s->irq_level[irq] = true;
-        } else {
-            s->irq_level[irq] = false;
+        s->irq_level[irq] = (strcmp(words[1], "raise") == 0);
+
+        g_strfreev(words);
+        goto redo;
+    } else if (strcmp(words[0], "IRQ_NAMED") == 0) {
+        bool level;
+        char key[IRQ_KEY_LENGTH];
+        irq_action *action;
+
+        g_assert(words[1] != NULL);
+        g_assert(words[2] != NULL);
+        g_assert(words[3] != NULL);
+
+        level = (strcmp(words[1], "raise") == 0);
+
+        g_assert_cmpint(snprintf(key, sizeof(key), "%s.%s",
+                        words[2], words[3]), <, sizeof(key));
+
+        action = g_hash_table_lookup(s->irq_handlers, key);
+
+        if (action) {
+            action_raise[action_count] = level;
+            actions[action_count++] = action;
         }
 
         g_strfreev(words);
@@ -363,6 +422,17 @@ redo:
         }
     } else {
         g_strfreev(words);
+    }
+
+    /* Defer processing of IRQ actions until all communications have been
+     * handled, otherwise, interrupt handler that cause further communication
+     * can disrupt the communication stream
+     */
+    for (action_index = 0; action_index < action_count; action_index++) {
+        irq_action *action = actions[action_index];
+        action->cb(action->opaque, action->name, action->n,
+                action_raise[action_index]);
+        action->level = action_raise[action_index];
     }
 
     return words;
