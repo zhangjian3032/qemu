@@ -1057,3 +1057,10 @@ void qtest_cb_for_every_machine(void (*cb)(const char *machine))
     qtest_end();
     QDECREF(response);
 }
+
+void qtest_irq_set(QTestState *s, const char *id, const char *gpiolist, int n,
+        bool level)
+{
+    qtest_sendf(s, "irq_set %s %s %d %d\n", id, gpiolist, n, level);
+    qtest_rsp(s, 0);
+}
