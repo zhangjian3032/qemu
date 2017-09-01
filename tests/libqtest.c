@@ -1156,3 +1156,10 @@ void qtest_qmp_device_del(const char *id)
     QDECREF(response1);
     QDECREF(response2);
 }
+
+void qtest_irq_set(QTestState *s, const char *id, const char *gpiolist, int n,
+        bool level)
+{
+    qtest_sendf(s, "irq_set %s %s %d %d\n", id, gpiolist, n, level);
+    qtest_rsp(s, 0);
+}
