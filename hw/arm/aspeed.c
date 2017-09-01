@@ -319,6 +319,8 @@ static void romulus_bmc_i2c_init(AspeedBoardState *bmc)
     AspeedSoCState *soc = &bmc->soc;
 
     i2c_create_slave(aspeed_i2c_get_bus(DEVICE(&soc->i2c), 11), "rx8900", 0x32);
+    i2c_create_slave(aspeed_i2c_get_bus(DEVICE(&soc->i2c), 11), "pca9552",
+                     0x60);
 }
 
 static void romulus_bmc_init(MachineState *machine)
