@@ -129,36 +129,6 @@ static const AspeedBoardConfig aspeed_boards[] = {
 
 #define FIRMWARE_ADDR 0x0
 
-static void write_boot_rom(DriveInfo *dinfo, hwaddr addr, size_t rom_size,
-                           Error **errp)
-{
-    BlockBackend *blk = blk_by_legacy_dinfo(dinfo);
-    uint8_t *storage;
-    int64_t size;
-
-    /* The block backend size should have already been 'validated' by
-     * the creation of the m25p80 object.
-     */
-    size = blk_getlength(blk);
-    if (size <= 0) {
-        error_setg(errp, "failed to get flash size");
-        return;
-    }
-
-    if (rom_size > size) {
-        rom_size = size;
-    }
-
-    storage = g_new0(uint8_t, rom_size);
-    if (blk_pread(blk, 0, storage, rom_size) < 0) {
-        error_setg(errp, "failed to read the initial flash content");
-        return;
-    }
-
-    rom_add_blob_fixed("aspeed.boot_rom", storage, rom_size, addr);
-    g_free(storage);
-}
-
 static void aspeed_board_init_flashes(AspeedSMCState *s, const char *flashtype,
                                       Error **errp)
 {
@@ -240,11 +210,10 @@ static void aspeed_board_init(MachineState *machine,
          * SoC and 128MB for the AST2500 SoC, which is twice as big as
          * needed by the flash modules of the Aspeed machines.
          */
-        memory_region_init_rom(boot_rom, OBJECT(bmc), "aspeed.boot_rom",
-                               fl->size, &error_abort);
+        memory_region_init_alias(boot_rom, OBJECT(bmc), "aspeed.boot_rom",
+                                 &fl->mmio, 0, fl->size);
         memory_region_add_subregion(get_system_memory(), FIRMWARE_ADDR,
                                     boot_rom);
-        write_boot_rom(drive0, FIRMWARE_ADDR, fl->size, &error_abort);
     }
 
     aspeed_board_binfo.kernel_filename = machine->kernel_filename;
