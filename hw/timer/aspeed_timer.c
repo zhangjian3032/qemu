@@ -128,10 +128,16 @@ static uint64_t calculate_next(struct AspeedTimer *t)
     if (now < next)
         return next;
 
-    /* We've missed all of the deadlines. Set a timer in the future to let
-     * execution catch up */
-    t->start = now;
-    return next + 10000;
+    /* We've missed all deadlines, fire interrupt and try again */
+    timer_del(&t->timer);
+
+    if (timer_overflow_interrupt(t)) {
+        t->level = !t->level;
+        qemu_set_irq(t->irq, t->level);
+    }
+
+    t->start = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+    return calculate_time(t, MAX(MAX(t->match[0], t->match[1]), 0));
 }
 
 static void aspeed_timer_mod(AspeedTimer *t)
