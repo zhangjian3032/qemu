@@ -107,6 +107,11 @@ static inline uint64_t calculate_time(struct AspeedTimer *t, uint32_t ticks)
     return t->start + delta_ns;
 }
 
+static inline uint32_t calculate_match(struct AspeedTimer *t, int i)
+{
+    return t->match[i] < t->reload ? t->match[i] : 0;
+}
+
 static uint64_t calculate_next(struct AspeedTimer *t)
 {
     uint64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
@@ -116,11 +121,11 @@ static uint64_t calculate_next(struct AspeedTimer *t)
      * registers, so sort using MAX/MIN/zero. We sort in that order as the
      * timer counts down to zero. */
 
-    next = calculate_time(t, MAX(t->match[0], t->match[1]));
+    next = calculate_time(t, MAX(calculate_match(t, 0), calculate_match(t, 1)));
     if (now < next)
         return next;
 
-    next = calculate_time(t, MIN(t->match[0], t->match[1]));
+    next = calculate_time(t, MIN(calculate_match(t, 0), calculate_match(t, 1)));
     if (now < next)
         return next;
 
@@ -136,8 +141,10 @@ static uint64_t calculate_next(struct AspeedTimer *t)
         qemu_set_irq(t->irq, t->level);
     }
 
+    next = MAX(MAX(calculate_match(t, 0), calculate_match(t, 1)), 0);
     t->start = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
-    return calculate_time(t, MAX(MAX(t->match[0], t->match[1]), 0));
+
+    return calculate_time(t, next);
 }
 
 static void aspeed_timer_mod(AspeedTimer *t)
