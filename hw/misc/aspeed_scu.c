@@ -234,7 +234,6 @@ static void aspeed_scu_write(void *opaque, hwaddr offset, uint64_t data,
     if (reg > PROT_KEY && reg < CPU2_BASE_SEG1 &&
             !s->regs[PROT_KEY]) {
         qemu_log_mask(LOG_GUEST_ERROR, "%s: SCU is locked!\n", __func__);
-        return;
     }
 
     trace_aspeed_scu_write(offset, size, data);
@@ -428,6 +427,12 @@ static void aspeed_scu_realize(DeviceState *dev, Error **errp)
                           TYPE_ASPEED_SCU, SCU_IO_REGION_SIZE);
 
     sysbus_init_mmio(sbd, &s->iomem);
+
+    /*
+     * Reset on realize to ensure the APB clock value is calculated in time for
+     * use by the timer model, which is reset before the SCU.
+     */
+    aspeed_scu_reset(dev);
 }
 
 static const VMStateDescription vmstate_aspeed_scu = {

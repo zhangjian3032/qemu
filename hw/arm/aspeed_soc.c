@@ -22,7 +22,9 @@
 #include "hw/i2c/aspeed_i2c.h"
 #include "net/net.h"
 
+#define ASPEED_SOC_UART_1_BASE      0x00183000
 #define ASPEED_SOC_UART_5_BASE      0x00184000
+#define ASPEED_SOC_VUART_BASE       0x00187000
 #define ASPEED_SOC_IOMEM_SIZE       0x00200000
 #define ASPEED_SOC_IOMEM_BASE       0x1E600000
 #define ASPEED_SOC_FMC_BASE         0x1E620000
@@ -31,9 +33,15 @@
 #define ASPEED_SOC_VIC_BASE         0x1E6C0000
 #define ASPEED_SOC_SDMC_BASE        0x1E6E0000
 #define ASPEED_SOC_SCU_BASE         0x1E6E2000
+#define ASPEED_SOC_ADC_BASE         0x1E6E9000
 #define ASPEED_SOC_SRAM_BASE        0x1E720000
+#define ASPEED_SOC_GPIO_BASE        0x1E780000
+#define ASPEED_SOC_RTC_BASE         0x1E781000
 #define ASPEED_SOC_TIMER_BASE       0x1E782000
 #define ASPEED_SOC_WDT_BASE         0x1E785000
+#define ASPEED_SOC_PWM_BASE         0x1E786000
+#define ASPEED_SOC_LPC_BASE         0x1E789000
+#define ASPEED_SOC_IBT_BASE         (ASPEED_SOC_LPC_BASE + 0x140)
 #define ASPEED_SOC_I2C_BASE         0x1E78A000
 #define ASPEED_SOC_ETH1_BASE        0x1E660000
 #define ASPEED_SOC_ETH2_BASE        0x1E680000
@@ -135,6 +143,14 @@ static void aspeed_soc_init(Object *obj)
     object_property_add_child(obj, "i2c", OBJECT(&s->i2c), NULL);
     qdev_set_parent_bus(DEVICE(&s->i2c), sysbus_get_default());
 
+    object_initialize(&s->adc, sizeof(s->adc), TYPE_ASPEED_ADC);
+    object_property_add_child(obj, "adc", OBJECT(&s->adc), NULL);
+    qdev_set_parent_bus(DEVICE(&s->adc), sysbus_get_default());
+
+    object_initialize(&s->rtc, sizeof(s->rtc), TYPE_ASPEED_RTC);
+    object_property_add_child(obj, "rtc", OBJECT(&s->rtc), NULL);
+    qdev_set_parent_bus(DEVICE(&s->rtc), sysbus_get_default());
+
     object_initialize(&s->fmc, sizeof(s->fmc), sc->info->fmc_typename);
     object_property_add_child(obj, "fmc", OBJECT(&s->fmc), NULL);
     qdev_set_parent_bus(DEVICE(&s->fmc), sysbus_get_default());
@@ -164,11 +180,29 @@ static void aspeed_soc_init(Object *obj)
         qdev_set_parent_bus(DEVICE(&s->wdt[i]), sysbus_get_default());
         qdev_prop_set_uint32(DEVICE(&s->wdt[i]), "silicon-rev",
                                     sc->info->silicon_rev);
+        object_property_add_const_link(OBJECT(&s->wdt[i]), "scu",
+                                       OBJECT(&s->scu), &error_abort);
     }
 
     object_initialize(&s->ftgmac100, sizeof(s->ftgmac100), TYPE_FTGMAC100);
     object_property_add_child(obj, "ftgmac100", OBJECT(&s->ftgmac100), NULL);
     qdev_set_parent_bus(DEVICE(&s->ftgmac100), sysbus_get_default());
+
+    object_initialize(&s->ibt, sizeof(s->ibt), TYPE_ASPEED_IBT);
+    object_property_add_child(obj, "bt", OBJECT(&s->ibt), NULL);
+    qdev_set_parent_bus(DEVICE(&s->ibt), sysbus_get_default());
+
+    object_initialize(&s->gpio, sizeof(s->gpio), TYPE_ASPEED_GPIO);
+    object_property_add_child(obj, "gpio", OBJECT(&s->gpio), NULL);
+    qdev_set_parent_bus(DEVICE(&s->gpio), sysbus_get_default());
+
+    object_initialize(&s->pwm, sizeof(s->pwm), TYPE_ASPEED_PWM);
+    object_property_add_child(obj, "pwm", OBJECT(&s->pwm), NULL);
+    qdev_set_parent_bus(DEVICE(&s->pwm), sysbus_get_default());
+
+    object_initialize(&s->lpc, sizeof(s->lpc), TYPE_ASPEED_LPC);
+    object_property_add_child(obj, "lpc", OBJECT(&s->lpc), NULL);
+    qdev_set_parent_bus(DEVICE(&s->lpc), sysbus_get_default());
 }
 
 static void aspeed_soc_realize(DeviceState *dev, Error **errp)
@@ -207,6 +241,14 @@ static void aspeed_soc_realize(DeviceState *dev, Error **errp)
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->scu), 0, ASPEED_SOC_SCU_BASE);
 
+    /* SDMC - SDRAM Memory Controller */
+    object_property_set_bool(OBJECT(&s->sdmc), true, "realized", &err);
+    if (err) {
+        error_propagate(errp, err);
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->sdmc), 0, ASPEED_SOC_SDMC_BASE);
+
     /* VIC */
     object_property_set_bool(OBJECT(&s->vic), true, "realized", &err);
     if (err) {
@@ -231,6 +273,26 @@ static void aspeed_soc_realize(DeviceState *dev, Error **errp)
         sysbus_connect_irq(SYS_BUS_DEVICE(&s->timerctrl), i, irq);
     }
 
+    /* ADC */
+    object_property_set_bool(OBJECT(&s->adc), true, "realized", &err);
+    if (err) {
+        error_propagate(errp, err);
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->adc), 0, ASPEED_SOC_ADC_BASE);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->adc), 0,
+            qdev_get_gpio_in(DEVICE(&s->vic), 31));
+
+    /* RTC */
+    object_property_set_bool(OBJECT(&s->rtc), true, "realized", &err);
+    if (err) {
+        error_propagate(errp, err);
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->rtc), 0, ASPEED_SOC_RTC_BASE);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->rtc), 0,
+            qdev_get_gpio_in(DEVICE(&s->vic), 22));
+
     /* UART - attach an 8250 to the IO space as our UART5 */
     if (serial_hd(0)) {
         qemu_irq uart5 = qdev_get_gpio_in(DEVICE(&s->vic), uart_irqs[4]);
@@ -239,7 +301,30 @@ static void aspeed_soc_realize(DeviceState *dev, Error **errp)
                        uart5, 38400, serial_hd(0), DEVICE_LITTLE_ENDIAN);
     }
 
+    /* VUART */
+    if (serial_hd(1)) {
+        qemu_irq vuart = qdev_get_gpio_in(DEVICE(&s->vic), 8);
+        serial_mm_init(get_system_memory(),
+                       ASPEED_SOC_IOMEM_BASE + ASPEED_SOC_VUART_BASE, 2,
+                       vuart, 38400, serial_hd(1), DEVICE_LITTLE_ENDIAN);
+    }
+
+    /* UART1 */
+    if (serial_hd(2)) {
+        qemu_irq uart1 = qdev_get_gpio_in(DEVICE(&s->vic), 9);
+        serial_mm_init(get_system_memory(),
+                       ASPEED_SOC_IOMEM_BASE + ASPEED_SOC_UART_1_BASE, 2,
+                       uart1, 38400, serial_hd(2), DEVICE_LITTLE_ENDIAN);
+    }
+
     /* I2C */
+    object_property_set_bool(OBJECT(&s->i2c),
+                             ASPEED_IS_AST2500(sc->info->silicon_rev),
+                             "has-dma", &err);
+    if (err) {
+        error_propagate(errp, err);
+        return;
+    }
     object_property_set_bool(OBJECT(&s->i2c), true, "realized", &err);
     if (err) {
         error_propagate(errp, err);
@@ -250,6 +335,18 @@ static void aspeed_soc_realize(DeviceState *dev, Error **errp)
                        qdev_get_gpio_in(DEVICE(&s->vic), 12));
 
     /* FMC, The number of CS is set at the board level */
+    object_property_set_int(OBJECT(&s->fmc), sc->info->sdram_base, "sdram-base",
+                            &err);
+    if (err) {
+        error_propagate(errp, err);
+        return;
+    }
+    object_property_set_int(OBJECT(&s->fmc), s->sdmc.max_ram_size,
+                            "max-ram-size", &err);
+    if (err) {
+        error_propagate(errp, err);
+        return;
+    }
     object_property_set_bool(OBJECT(&s->fmc), true, "realized", &err);
     if (err) {
         error_propagate(errp, err);
@@ -276,14 +373,6 @@ static void aspeed_soc_realize(DeviceState *dev, Error **errp)
                         s->spi[i].ctrl->flash_window_base);
     }
 
-    /* SDMC - SDRAM Memory Controller */
-    object_property_set_bool(OBJECT(&s->sdmc), true, "realized", &err);
-    if (err) {
-        error_propagate(errp, err);
-        return;
-    }
-    sysbus_mmio_map(SYS_BUS_DEVICE(&s->sdmc), 0, ASPEED_SOC_SDMC_BASE);
-
     /* Watch dog */
     for (i = 0; i < sc->info->wdts_num; i++) {
         object_property_set_bool(OBJECT(&s->wdt[i]), true, "realized", &err);
@@ -308,6 +397,45 @@ static void aspeed_soc_realize(DeviceState *dev, Error **errp)
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->ftgmac100), 0, ASPEED_SOC_ETH1_BASE);
     sysbus_connect_irq(SYS_BUS_DEVICE(&s->ftgmac100), 0,
                        qdev_get_gpio_in(DEVICE(&s->vic), 2));
+
+    /* iBT */
+    object_property_set_bool(OBJECT(&s->ibt), true, "realized", &err);
+    if (err) {
+        error_propagate(errp, err);
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->ibt), 0, ASPEED_SOC_IBT_BASE);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->ibt), 0,
+                       qdev_get_gpio_in(DEVICE(&s->vic), 8));
+
+    /* GPIO */
+    object_property_set_bool(OBJECT(&s->gpio), true, "realized", &err);
+    if (err) {
+        error_propagate(errp, err);
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->gpio), 0, ASPEED_SOC_GPIO_BASE);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->gpio), 0,
+            qdev_get_gpio_in(DEVICE(&s->vic), 20));
+
+    /* PWM */
+    object_property_set_bool(OBJECT(&s->pwm), true, "realized", &err);
+    if (err) {
+        error_propagate(errp, err);
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->pwm), 0, ASPEED_SOC_PWM_BASE);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->pwm), 0,
+            qdev_get_gpio_in(DEVICE(&s->vic), 28));
+
+    /* LPC */
+    object_property_set_bool(OBJECT(&s->lpc), true, "realized", &err);
+    if (err) {
+        error_propagate(errp, err);
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->lpc), 0, ASPEED_SOC_LPC_BASE);
+    /* LPC IRQ in use by the iBT sub controller */
 }
 
 static void aspeed_soc_class_init(ObjectClass *oc, void *data)
