@@ -69,6 +69,7 @@ typedef struct AspeedSoCInfo {
     const char *fmc_typename;
     const char **spi_typename;
     int wdts_num;
+    const int *irqmap;
 } AspeedSoCInfo;
 
 typedef struct AspeedSoCClass {
