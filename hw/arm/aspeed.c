@@ -169,6 +169,7 @@ static void aspeed_board_init(MachineState *machine,
     AspeedSoCClass *sc;
     DriveInfo *drive0 = drive_get(IF_MTD, 0, 0);
     ram_addr_t max_ram_size;
+    int i;
 
     bmc = g_new0(AspeedBoardState, 1);
 
@@ -252,6 +253,19 @@ static void aspeed_board_init(MachineState *machine,
 
     if (cfg->i2c_init) {
         cfg->i2c_init(bmc);
+    }
+
+    for (i = 0; i < ARRAY_SIZE(bmc->soc.sdhci.slots); i++) {
+        SDHCIState *sdhci = &bmc->soc.sdhci.slots[i];
+        DriveInfo *dinfo = drive_get_next(IF_SD);
+        BlockBackend *blk;
+        DeviceState *card;
+
+        blk = dinfo ? blk_by_legacy_dinfo(dinfo) : NULL;
+        card = qdev_create(qdev_get_child_bus(DEVICE(sdhci), "sd-bus"),
+                           TYPE_SD_CARD);
+        qdev_prop_set_drive(card, "drive", blk, &error_fatal);
+        object_property_set_bool(OBJECT(card), true, "realized", &error_fatal);
     }
 
     arm_load_kernel(ARM_CPU(first_cpu), &aspeed_board_binfo);
