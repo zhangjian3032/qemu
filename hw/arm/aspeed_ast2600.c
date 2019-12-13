@@ -220,6 +220,9 @@ static void aspeed_soc_ast2600_init(Object *obj)
 
     sysbus_init_child_obj(obj, "emmc[*]", OBJECT(&s->emmc.slots[0]),
             sizeof(s->emmc.slots[0]), TYPE_SYSBUS_SDHCI);
+
+    sysbus_init_child_obj(obj, "ibt", OBJECT(&s->ibt), sizeof(s->ibt),
+                          TYPE_ASPEED_IBT);
 }
 
 /*
@@ -538,6 +541,16 @@ static void aspeed_soc_ast2600_realize(DeviceState *dev, Error **errp)
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->emmc), 0, sc->memmap[ASPEED_EMMC]);
     sysbus_connect_irq(SYS_BUS_DEVICE(&s->emmc), 0,
                        aspeed_soc_get_irq(s, ASPEED_EMMC));
+
+    /* iBT */
+    object_property_set_bool(OBJECT(&s->ibt), true, "realized", &err);
+    if (err) {
+        error_propagate(errp, err);
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->ibt), 0, sc->memmap[ASPEED_IBT]);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->ibt), 0,
+                       aspeed_soc_get_irq(s, ASPEED_LPC));
 }
 
 static void aspeed_soc_ast2600_class_init(ObjectClass *oc, void *data)
