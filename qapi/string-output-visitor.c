@@ -12,6 +12,7 @@
 
 #include "qemu/osdep.h"
 #include "qemu/cutils.h"
+#include "qapi/error.h"
 #include "qapi/string-output-visitor.h"
 #include "qapi/visitor-impl.h"
 #include "qemu/host-utils.h"
@@ -270,6 +271,16 @@ static void print_type_null(Visitor *v, const char *name, QNull **obj,
     string_output_set(sov, out);
 }
 
+static void start_struct(Visitor *v, const char *name, void **obj, size_t size,
+           Error **errp)
+{
+    error_setg(errp, "struct type not implemented");
+}
+
+static void end_struct(Visitor *v, void **obj)
+{
+}
+
 static void
 start_list(Visitor *v, const char *name, GenericList **list, size_t size,
            Error **errp)
@@ -361,6 +372,8 @@ Visitor *string_output_visitor_new(bool human, char **result)
     v->visitor.end_list = end_list;
     v->visitor.complete = string_output_complete;
     v->visitor.free = string_output_free;
+    v->visitor.start_struct = start_struct;
+    v->visitor.end_struct = end_struct;
 
     return &v->visitor;
 }
