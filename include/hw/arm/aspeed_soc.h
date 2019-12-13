@@ -28,6 +28,7 @@
 #include "hw/gpio/aspeed_gpio.h"
 #include "hw/sd/aspeed_sdhci.h"
 #include "hw/misc/aspeed_ibt.h"
+#include "hw/misc/aspeed_pwm.h"
 
 #define ASPEED_SPIS_NUM  2
 #define ASPEED_WDTS_NUM  4
@@ -62,6 +63,7 @@ typedef struct AspeedSoCState {
     AspeedSDHCIState sdhci;
     AspeedSDHCIState emmc;
     AspeedIBTState ibt;
+    AspeedPWMState pwm;
 } AspeedSoCState;
 
 #define TYPE_ASPEED_SOC "aspeed-soc"
