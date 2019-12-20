@@ -739,6 +739,7 @@ static uint64_t aspeed_smc_flash_read(void *opaque, hwaddr addr, unsigned size)
         break;
     case CTRL_READMODE:
     case CTRL_FREADMODE:
+        aspeed_smc_flash_unselect(fl);
         aspeed_smc_flash_select(fl);
         aspeed_smc_flash_setup(fl, addr);
 
