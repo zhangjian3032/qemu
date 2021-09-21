@@ -2122,6 +2122,7 @@ if have_system
     'hw/input',
     'hw/intc',
     'hw/isa',
+    'hw/fsi',
     'hw/mem',
     'hw/mips',
     'hw/misc',
