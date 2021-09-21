@@ -1086,10 +1086,15 @@ static void aspeed_smc_write(void *opaque, hwaddr addr, uint64_t data,
 
     addr >>= 2;
 
-    if (addr == s->r_conf ||
-        (addr >= s->r_timings &&
-         addr < s->r_timings + asc->nregs_timings) ||
-        addr == s->r_ce_ctrl) {
+    if (addr == s->r_conf) {
+        s->regs[addr] = value;
+        if (value & CONF_LEGACY_DISABLE) {
+            ;
+            /* TODO: Disable SMC register 0x16000000 window */
+        }
+    } else if ((addr >= s->r_timings &&
+                addr < s->r_timings + asc->nregs_timings) ||
+               addr == s->r_ce_ctrl) {
         s->regs[addr] = value;
     } else if (addr >= s->r_ctrl0 && addr < s->r_ctrl0 + s->num_cs) {
         int cs = addr - s->r_ctrl0;
