@@ -293,7 +293,8 @@ static void aspeed_ast2500_scu_write(void *opaque, hwaddr offset,
     if (reg > PROT_KEY && reg < CPU2_BASE_SEG1 &&
             !s->regs[PROT_KEY]) {
         qemu_log_mask(LOG_GUEST_ERROR, "%s: SCU is locked!\n", __func__);
-        return;
+        /* TODO: why drop the return for ADC */
+        /* return; */
     }
 
     trace_aspeed_scu_write(offset, size, data);
