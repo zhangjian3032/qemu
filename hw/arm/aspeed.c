@@ -564,6 +564,27 @@ static void ast2600_evb_i2c_init(AspeedMachineState *bmc)
                      TYPE_TMP105, 0x4d);
 }
 
+static void my_i2c_init(AspeedMachineState *bmc)
+{
+    AspeedSoCState *soc = &bmc->soc;
+    uint8_t *eeprom_buf = g_malloc0(8 * 1024);
+
+    uint8_t buf[] = {
+        0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0xfe,
+        0x01, 0x06, 0x19, 0xc9, 0x42, 0x69, 0x67, 0x56,
+        0x65, 0x6e, 0x64, 0x6f, 0x72, 0xc5, 0x4d, 0x79,
+        0x42, 0x4d, 0x43, 0xc4, 0x41, 0x41, 0x42, 0x42,
+        0xc4, 0x43, 0x43, 0x44, 0x44, 0xc4, 0x45, 0x45,
+        0x46, 0x46, 0xc4, 0x48, 0x48, 0x47, 0x47, 0xc0,
+        0xc1, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x61
+    };
+
+    memcpy(eeprom_buf, buf, sizeof(buf));
+
+    smbus_eeprom_init_one(aspeed_i2c_get_bus(&soc->i2c, 1), 0x50,
+                          eeprom_buf);
+}
+
 static void romulus_bmc_i2c_init(AspeedMachineState *bmc)
 {
     AspeedSoCState *soc = &bmc->soc;
@@ -1348,7 +1369,7 @@ static void aspeed_machine_my_bmc_class_init(ObjectClass *oc, void *data)
     amc->num_cs    = 1;
     amc->macs_mask = ASPEED_MAC0_ON | ASPEED_MAC1_ON | ASPEED_MAC2_ON |
                      ASPEED_MAC3_ON;
-    amc->i2c_init  = ast2600_evb_i2c_init;
+    amc->i2c_init  = my_i2c_init;
     mc->default_ram_size = 1 * GiB;
     mc->default_cpus = mc->min_cpus = mc->max_cpus =
         aspeed_soc_num_cpus(amc->soc_name);
