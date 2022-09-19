@@ -455,6 +455,7 @@ config ASPEED_SOC
     select EMC141X
     select UNIMP
     select LED
+    select HOST_POWER
     select PMBUS
     select MAX31785
 

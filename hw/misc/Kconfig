@@ -147,6 +147,9 @@ config UNIMP
 config LED
     bool
 
+config HOST_POWER
+    bool
+
 config MAC_VIA
     bool
     select MOS6522
