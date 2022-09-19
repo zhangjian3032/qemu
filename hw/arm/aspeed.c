@@ -28,6 +28,7 @@
 #include "hw/qdev-clock.h"
 #include "sysemu/sysemu.h"
 #include "hw/arm/fby35.h"
+#include "hw/misc/host_power.h"
 
 static struct arm_boot_info aspeed_board_binfo = {
     .board_id = -1, /* device-tree-only board */
@@ -723,6 +724,19 @@ static void g220a_bmc_i2c_init(AspeedMachineState *bmc)
     };
     smbus_eeprom_init_one(aspeed_i2c_get_bus(&soc->i2c, 4), 0x57,
                           eeprom_buf);
+
+    // Add a host-power device
+    HostPowerState *power = host_power_create_simple(OBJECT(bmc));
+
+    // connect the power button(in) to soc(out)
+    // the power button in g220a is 215
+    qdev_connect_gpio_out(DEVICE(&bmc->soc.gpio), 215,
+                         qdev_get_gpio_in_named(DEVICE(power), "button", 0));
+
+    // connect the power good signal(out) to soc(in)
+    // the power good in g220a is 209
+    qdev_connect_gpio_out_named(DEVICE(power), "power-good", 0,
+                                qdev_get_gpio_in(DEVICE(&bmc->soc.gpio), 209));
 }
 
 static void aspeed_eeprom_init(I2CBus *bus, uint8_t addr, uint32_t rsize)
